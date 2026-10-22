@@ -284,6 +284,15 @@ describe("parallel architecture: bounded improvement", () => {
     expect(judgeHybrid(prev, evaluation({ artist_music: "supported", event_place: "supported" }, 0, ["x"]), []).rejectionCode).toBe("constraint_conflict");
     expect(judgeHybrid(prev, evaluation({ artist_music: "supported", event_place: "supported" }), ["breaks the brief"]).rejectionCode).toBe("hard_failure");
     expect(judgeHybrid(prev, prev, []).rejectionCode).toBe("no_improvement");
+    // Better on Qloo but drops a brand attribute or a named choice: the brief comes first.
+    expect(judgeHybrid(prev, evaluation({ artist_music: "supported", event_place: "supported" }), [], { before: 3, after: 2 }).rejectionCode).toBe("brief_fit_lost");
+    expect(judgeHybrid(prev, evaluation({ artist_music: "supported", event_place: "supported" }), [], { before: 3, after: 3 }).accepted).toBe(true);
+  });
+
+  it("matches brand attributes by stem, so a direction isn't faulted for a word form", async () => {
+    // "utilitarianism" (the attribute) and "utilitarian" (the direction) are the same term.
+    const { p } = await run({ ...LONDON_BRIEF, brandAttributes: ["utilitarianism"] });
+    expect(p.matrix.claims.find((c) => c.candidateId === "llm" && c.claimId.endsWith("/creative_direction/attributes"))).toMatchObject({ stance: "supports" });
   });
 
   it("18. hybrids are accepted only after a complete-plan re-test", async () => {

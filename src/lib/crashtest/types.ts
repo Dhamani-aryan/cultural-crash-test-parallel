@@ -566,7 +566,7 @@ export interface HybridAttempt {
   kind: "union" | "swap" | "search";
   slot?: Slot;
   accepted: boolean;
-  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked";
+  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked" | "brief_fit_lost";
   reason: string;
   retest?: {
     supportedBefore: number;
@@ -576,6 +576,9 @@ export interface HybridAttempt {
     lostSupported: Slot[];
     violationsBefore: number;
     violationsAfter: number;
+    /** Supporting brief-fit claims (role fit, user intent) before and after. */
+    briefFitBefore?: number;
+    briefFitAfter?: number;
   };
 }
 

@@ -1,7 +1,7 @@
 import { nameKey } from "@/lib/engine/stats";
 import type { QlooEntity } from "@/lib/qloo";
 import { unverifiableRules } from "./constraints";
-import { fitsBrief, isFoodAndDrink, ruledOut, venueFormat } from "./repair";
+import { fitsBrief, isFoodAndDrink, ruledOut, stem, venueFormat } from "./repair";
 import {
   SLOTS,
   SLOT_LABEL,
@@ -296,7 +296,8 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
         { ruleId: "R-artist-type" },
       );
     if (slot === "creative_direction") {
-      const text = new Set(words([comp.label, ...comp.tags.map((t) => t.name)].join(" ")));
+      // Compared by stem: "minimalism" carries "minimalist".
+      const text = new Set(words([comp.label, ...comp.tags.map((t) => t.name)].join(" ")).map(stem));
       const attrs = brief.brandAttributes.flatMap(words);
       const ruled = comp.tags.find((t) => banned.some((p) => p.includes(t.name.toLowerCase()) || t.name.toLowerCase().includes(p)));
       if (ruled) {
@@ -308,7 +309,7 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
         add(slot, "constraint", "ruled-out", `The direction uses "${ruled.name}", which a hard rule rules out.`, "contradicts", "logical_rubric", "strong", { ruleId: "R-ruled-out-phrase" });
       }
       if (attrs.length) {
-        const shared = attrs.filter((w) => text.has(w));
+        const shared = attrs.filter((w) => text.has(stem(w)));
         add(
           slot,
           "role_fit",

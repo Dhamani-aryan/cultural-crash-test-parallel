@@ -5,10 +5,14 @@
  *   npm run scenario:run -- eyewear-tokyo non-alcoholic-london
  *
  * Full states are written under eval/out/scenario-runs; the compact index is suitable for review.
+ *
+ * RECOMMENDATION_ARCHITECTURE=parallel runs the parallel engine instead and writes to
+ * eval/out/scenario-runs-parallel and eval/out/scenario-summary-parallel.json, so it never
+ * overwrites the sequential baseline. SCENARIO_TAG=<tag> picks another suffix.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { runCrashTest } from "../src/lib/crashtest/run";
-import { RUN_VERSION } from "../src/lib/crashtest/version";
+import { architectureFrom, runVersionFor } from "../src/lib/crashtest/version";
 import type { RunState } from "../src/lib/crashtest/types";
 import { createMemoryCache } from "../src/lib/cache/cache";
 import { getQlooEnv } from "../src/lib/env";
@@ -38,9 +42,12 @@ const deps = {
   ),
   qlooStats,
 };
-const directory = "eval/out/scenario-runs";
+const ARCHITECTURE = architectureFrom();
+const RUN_VERSION = runVersionFor(ARCHITECTURE);
+const suffix = process.env.SCENARIO_TAG ?? (ARCHITECTURE === "parallel" ? "parallel" : "");
+const directory = `eval/out/scenario-runs${suffix ? `-${suffix}` : ""}`;
 mkdirSync(directory, { recursive: true });
-const summaryFile = "eval/out/scenario-summary.json";
+const summaryFile = `eval/out/scenario-summary${suffix ? `-${suffix}` : ""}.json`;
 type SavedSummary = { id: string; [key: string]: unknown };
 const previous = existsSync(summaryFile)
   ? (JSON.parse(readFileSync(summaryFile, "utf8")) as { summaries?: SavedSummary[] }).summaries ?? []
@@ -54,7 +61,7 @@ for (const row of selected) {
   process.stdout.write(`${row.id} … `);
   const started = Date.now();
   try {
-    const state = await runCrashTest(deps, toLaunchBrief(row.state!), { runVersion: RUN_VERSION });
+    const state = await runCrashTest(deps, toLaunchBrief(row.state!), { runVersion: RUN_VERSION, architecture: ARCHITECTURE });
     writeFileSync(`${directory}/${row.id}.json`, JSON.stringify(state, null, 2));
     const first = state.evaluations[0];
     const last = state.evaluations.at(-1);
@@ -74,9 +81,21 @@ for (const row of selected) {
       qlooChecks: state.qlooCallsUsed,
       modelCalls: state.llmCalls,
       error: state.stopReason === "error" ? state.stopDetail ?? "unknown error" : null,
+      ...(state.parallel
+        ? {
+            winner: state.parallel.verdict.candidateId,
+            winnerTrack: state.parallel.verdict.track,
+            verdict: state.parallel.verdict.verdict,
+            stable: state.parallel.verdict.stable,
+            usage: state.parallel.usage,
+          }
+        : {}),
     };
     summaries.set(row.id, summary);
-    console.log(`${summary.initialSupported}→${summary.finalSupported} supported; ${summary.accepted.length} accepted; ${summary.rejected.length} rejected; ${summary.unresolved.length} unresolved`);
+    console.log(
+      `${summary.initialSupported}→${summary.finalSupported} supported; ${summary.accepted.length} accepted; ${summary.rejected.length} rejected; ${summary.unresolved.length} unresolved` +
+        (state.parallel ? `; final ${state.parallel.verdict.track ?? "none"} (${state.parallel.verdict.verdict}${state.parallel.verdict.stable ? ", stable" : ""})` : ""),
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     summaries.set(row.id, { id: row.id, title: row.title, runVersion: RUN_VERSION, error: message, ms: Date.now() - started });
@@ -86,4 +105,4 @@ for (const row of selected) {
   writeFileSync(summaryFile, JSON.stringify({ ranAt: new Date().toISOString(), runVersion: RUN_VERSION, summaries: ordered }, null, 2));
 }
 
-console.log("wrote eval/out/scenario-summary.json");
+console.log(`wrote ${summaryFile}`);

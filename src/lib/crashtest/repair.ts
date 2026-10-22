@@ -222,7 +222,8 @@ const GENERIC = new Set(
     " ",
   ),
 );
-const stem = (w: string) =>
+/** A crude stem, so "minimalist" and "minimalism" (or "craft" and "crafted") count as the same term. */
+export const stem = (w: string) =>
   w.replace(/(ability|ibility|able|ible|ity|ness|ing|ed|es|s)$/, "").slice(0, 7);
 function terms(text: string): Set<string> {
   return new Set(

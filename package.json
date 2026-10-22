@@ -23,6 +23,7 @@
     "eval:plausibility": "tsx --env-file-if-exists=.env.local eval/plausibility-run.ts",
     "scenario:intake": "tsx --env-file-if-exists=.env.local eval/scenario-intake.ts",
     "scenario:run": "tsx --env-file-if-exists=.env.local eval/scenario-run.ts",
+    "scenario:compare": "tsx --env-file-if-exists=.env.local eval/scenario-compare.ts",
     "llm:login": "tsx --env-file-if-exists=.env.local scripts/chatgpt-login.ts",
     "llm:push-credential": "tsx --env-file-if-exists=.env.local scripts/push-chatgpt-credential.ts"
   },

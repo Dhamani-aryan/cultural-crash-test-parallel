@@ -93,6 +93,8 @@ export function judgeHybrid(
   prev: PlanEvaluation,
   next: PlanEvaluation,
   nextHard: string[],
+  /** Supporting brief-fit claims (role fit, user intent) before and after: the brief comes before Qloo scores. */
+  fit?: { before: number; after: number },
 ): { accepted: boolean; rejectionCode?: HybridAttempt["rejectionCode"]; retest: NonNullable<HybridAttempt["retest"]> } {
   const lostSupported = prev.components
     .filter((c) => c.status === "supported" && next.components.find((x) => x.slot === c.slot)?.status !== "supported")
@@ -105,10 +107,12 @@ export function judgeHybrid(
     lostSupported,
     violationsBefore: prev.hardConstraintViolations.length,
     violationsAfter: next.hardConstraintViolations.length,
+    ...(fit ? { briefFitBefore: fit.before, briefFitAfter: fit.after } : {}),
   };
-  let rejectionCode: RejectionCode | "hard_failure" | undefined;
+  let rejectionCode: RejectionCode | "hard_failure" | "brief_fit_lost" | undefined;
   if (nextHard.length) rejectionCode = "hard_failure";
   else if (next.hardConstraintViolations.length > prev.hardConstraintViolations.length) rejectionCode = "constraint_conflict";
+  else if (fit && fit.after < fit.before) rejectionCode = "brief_fit_lost";
   else if (lostSupported.length && !(next.contradicted < prev.contradicted)) rejectionCode = "plan_regression";
   else if (!planProgress(prev, next).material) rejectionCode = "no_improvement";
   return { accepted: !rejectionCode, rejectionCode, retest };
@@ -116,6 +120,7 @@ export function judgeHybrid(
 
 const REASON: Record<NonNullable<HybridAttempt["rejectionCode"]>, string> = {
   hard_failure: "It breaks a hard rule of the brief.",
+  brief_fit_lost: "It loses brief or role fit the incumbent had (a choice you named, or a brand attribute), whatever Qloo says.",
   constraint_conflict: "It breaks more hard constraints than the incumbent.",
   plan_regression: "It costs a supported choice without removing a contradiction.",
   no_improvement: "The complete-plan re-test showed no material improvement.",
@@ -299,8 +304,11 @@ export async function optimize(input: OptimizeInput, deps: OptimizerDeps): Promi
         provenance: { qlooCalls: 0, llmCalls: 0, ms: 0, generatedAt: new Date().toISOString() },
       };
       hybrids.push(cand);
-      const hard = deps.matrix([cand]).hardFailures[cand.candidateId] ?? [];
-      const verdict = judgeHybrid(incumbent.evaluation!, evaluation, hard);
+      const pair = deps.matrix([incumbent, cand]);
+      const hard = pair.hardFailures[cand.candidateId] ?? [];
+      const fitOf = (id: string) =>
+        pair.claims.filter((c) => c.candidateId === id && c.stance === "supports" && (c.dimension === "role_fit" || c.claimId.endsWith("/user-intent"))).length;
+      const verdict = judgeHybrid(incumbent.evaluation!, evaluation, hard, { before: fitOf(incumbent.candidateId), after: fitOf(cand.candidateId) });
       const attempt: HybridAttempt = {
         ...base,
         accepted: verdict.accepted,
