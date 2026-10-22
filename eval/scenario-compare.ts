@@ -30,6 +30,10 @@ import { withCache } from "../src/lib/qloo/cached";
 import { judgePlans } from "./judge";
 
 const OUT = "eval/out";
+/** PARALLEL_TAG=<tag> compares eval/out/scenario-runs-<tag> (default "parallel"); outputs carry the tag. */
+const TAG = process.env.PARALLEL_TAG ?? "parallel";
+const PAR_DIR = `scenario-runs-${TAG}`;
+const SUFFIX = TAG === "parallel" ? "" : `-${TAG}`;
 const intake = JSON.parse(readFileSync(`${OUT}/scenario-intake.json`, "utf8")) as { rows: { id: string; title: string }[] };
 const load = (dir: string, id: string): RunState | null => (existsSync(`${OUT}/${dir}/${id}.json`) ? (JSON.parse(readFileSync(`${OUT}/${dir}/${id}.json`, "utf8")) as RunState) : null);
 const qloo = withCache(createQlooClient({ ...getQlooEnv(), timeoutMs: 20_000, maxRetries: 4, onEmpty: () => {} }), createMemoryCache(50_000));
@@ -111,15 +115,18 @@ function side(s: RunState, final: CulturalPlan | null, finalEval: PlanEvaluation
 }
 
 const rows: Row[] = [];
+/** The versions the parallel runs recorded, as they recorded them. */
+const parVersions = new Set<string>();
 for (const { id, title } of intake.rows) {
   const seq = load("scenario-runs", id);
-  const par = load("scenario-runs-parallel", id);
+  const par = load(PAR_DIR, id);
   process.stdout.write(`${id} … `);
   if (!seq || !par?.parallel) {
     console.log(`skipped (${!seq ? "no sequential run" : "no parallel run"})`);
     continue;
   }
   const p = par.parallel;
+  if (par.provenance?.runVersion) parVersions.add(par.provenance.runVersion);
   const seqFinal = seq.plan;
   const parFinal = p.verdict.plan;
   const attempts = p.rounds.flatMap((r) => r.attempts.filter((a) => a.rejectionCode !== "duplicate"));
@@ -165,8 +172,8 @@ for (const { id, title } of intake.rows) {
 }
 
 // ---------- blinded human review: created once, never overwritten ----------
-const reviewFile = `${OUT}/scenario-architecture-human-review.json`;
-const keyFile = `${OUT}/scenario-architecture-human-review-key.json`;
+const reviewFile = `${OUT}/scenario-architecture-human-review${SUFFIX}.json`;
+const keyFile = `${OUT}/scenario-architecture-human-review-key${SUFFIX}.json`;
 if (!existsSync(reviewFile)) {
   const key: Record<string, { X: string; Y: string }> = {};
   const review = rows.map((r) => {
@@ -251,7 +258,7 @@ const p = totals.parallel;
 const md = [
   "# Sequential vs parallel architecture — 15 scenarios",
   "",
-  `Generated ${new Date().toISOString()}. Sequential: the control (\`crash:v15\`), runs as recorded in \`eval/out/scenario-runs\`. Parallel: \`crash:v15+parallel:v1\`, runs in \`eval/out/scenario-runs-parallel\`. Exact counts over ${n} scenarios (${slots} choices); no significance claims.`,
+  `Generated ${new Date().toISOString()}. Sequential: the control (\`crash:v15\`), runs as recorded in \`eval/out/scenario-runs\`. Parallel: \`${[...parVersions].join(", ") || "unknown"}\`, runs in \`eval/out/${PAR_DIR}\`. Exact counts over ${n} scenarios (${slots} choices); no significance claims.`,
   "",
   "## Totals",
   "",
@@ -278,7 +285,7 @@ const md = [
   "",
   `**Blind LLM judge (no evidence, both orders; a preference counts only when both agree):** parallel ${totals.judge.parallel}, sequential ${totals.judge.sequential}, tie ${totals.judge.tie} (of which the orders disagreed: ${totals.judge.inconsistent}). The judge is the same model family as the drafting model, so self-preference bias may remain.`,
   "",
-  `**Blind human preference:** ${human.reviewed ? `${human.reviewed} reviewed — parallel ${human.parallel}, sequential ${human.sequential}, tie ${human.tie}.` : `not yet reviewed (0 of ${n}). Fill in \`eval/out/scenario-architecture-human-review.json\`; the label key is in a separate file.`}`,
+  `**Blind human preference:** ${human.reviewed ? `${human.reviewed} reviewed — parallel ${human.parallel}, sequential ${human.sequential}, tie ${human.tie}.` : `not yet reviewed (0 of ${n}). Fill in \`${reviewFile}\`; the label key is in a separate file.`}`,
   "",
   "## Per scenario",
   "",
@@ -297,6 +304,6 @@ const md = [
   "",
 ].join("\n");
 
-writeFileSync(`${OUT}/scenario-architecture-comparison.md`, md);
-writeFileSync(`${OUT}/scenario-architecture-comparison.json`, JSON.stringify({ generatedAt: new Date().toISOString(), totals, rows }, null, 2));
-console.log(`wrote ${OUT}/scenario-architecture-comparison.md`);
+writeFileSync(`${OUT}/scenario-architecture-comparison${SUFFIX}.md`, md);
+writeFileSync(`${OUT}/scenario-architecture-comparison${SUFFIX}.json`, JSON.stringify({ generatedAt: new Date().toISOString(), parallelRuns: PAR_DIR, totals, rows }, null, 2));
+console.log(`wrote ${OUT}/scenario-architecture-comparison${SUFFIX}.md`);

@@ -24,8 +24,11 @@ export function rankingFrom(option?: Ranking): Ranking {
 export type Architecture = "sequential" | "parallel";
 export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
 
-/** The parallel engine's own version, recorded beside RUN_VERSION. */
-export const PARALLEL_VERSION = "parallel:v1";
+/**
+ * The parallel engine's own version, recorded beside RUN_VERSION. v2: the user's named acts and
+ * brands get namesake protection in every track (v1 could test a user's "Divine" as the wrong one).
+ */
+export const PARALLEL_VERSION = "parallel:v2";
 /** The structured evidence-claim rules (evidence matrix). */
 export const EVIDENCE_RUBRIC_VERSION = "evidence:v1";
 /** The blind, order-rotated adjudication protocol. */

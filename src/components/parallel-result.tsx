@@ -125,7 +125,7 @@ export function ParallelRunResult({ state }: { state: RunState }) {
         <h2 className="mt-2 max-w-2xl text-2xl font-semibold tracking-[-0.035em] text-ink">Best complete plan: {s.winner}</h2>
         <p className={`mt-2 max-w-2xl text-[15px] leading-6 ${s.stable ? "text-ink-2" : "text-weak"}`}>{s.stability}</p>
         <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-3">
-          <Stat label="Hard rules passed" value={`${s.hardConstraints.passed} of ${s.hardConstraints.total}`} />
+          <Stat label="Hard rules passed" value={s.hardConstraints.total ? `${s.hardConstraints.passed} of ${s.hardConstraints.total}` : "None set"} />
           <Stat label="Evidence coverage" value={`${Math.round(s.coverage * 100)}%`} />
           <Stat label="Supported / thin / unverified" value={`${s.counts.supported} / ${s.counts.thin} / ${s.counts.unverified + s.counts.needsHuman}`} />
           <Stat label="Qloo checks · model calls" value={`${s.qlooChecks} · ${s.modelCalls}`} />

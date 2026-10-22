@@ -83,6 +83,11 @@ for (const row of selected) {
       error: state.stopReason === "error" ? state.stopDetail ?? "unknown error" : null,
       ...(state.parallel
         ? {
+            // A parallel run changes plans through hybrids, re-tested as complete plans.
+            accepted: state.parallel.rounds.flatMap((r) => r.attempts.filter((a) => a.accepted).map((a) => ({ slot: a.slot ?? null, after: a.candidateId, reason: a.reason }))),
+            rejected: state.parallel.rounds.flatMap((r) =>
+              r.attempts.filter((a) => !a.accepted && a.rejectionCode !== "duplicate").map((a) => ({ slot: a.slot ?? null, after: a.candidateId, outcome: a.rejectionCode })),
+            ),
             winner: state.parallel.verdict.candidateId,
             winnerTrack: state.parallel.verdict.track,
             verdict: state.parallel.verdict.verdict,

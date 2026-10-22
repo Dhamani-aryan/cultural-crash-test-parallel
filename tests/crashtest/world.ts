@@ -160,6 +160,8 @@ export function worldLlm(
     judge?: (prompt: string, call: number) => unknown;
     /** Anchor hypotheses when the brief names none. */
     anchors?: { name: string; country: string }[];
+    /** The country the model gives for every act or brand the user named. */
+    choiceCountry?: string;
   } = {},
 ) {
   const prompts: string[] = [];
@@ -175,6 +177,13 @@ export function worldLlm(
       const reply = (x: unknown) => ({ text: typeof x === "string" ? x : JSON.stringify(x), usage: null, model: "fake", ms: 1 });
       if (system.startsWith("You compare anonymous launch plans"))
         return reply(over.judge ? over.judge(prompt, judgeCalls++) : evidenceJudge(prompt));
+      if (system.startsWith("For each music act or brand named below"))
+        return reply({
+          choices: prompt
+            .split("\n")
+            .filter((l) => l.startsWith("- "))
+            .map((l) => ({ name: l.slice(2), country: over.choiceCountry ?? "United Kingdom" })),
+        });
       if (system.startsWith("Suggest broader, established audience anchors"))
         return reply({ anchors: [{ name: "Northcap", country: "United Kingdom" }, { name: "Deckhouse", country: "United Kingdom" }] });
       if (system.startsWith("Suggest audience anchors for measurement only"))

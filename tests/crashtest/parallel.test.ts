@@ -99,6 +99,16 @@ describe("parallel architecture: independent tracks", () => {
     expect(claim.stance).toBe("unknown");
   });
 
+  it("gives the user's named choices namesake protection, identically in every track", async () => {
+    // Qloo's only "Big Tex" is American; the user means one from India, so it must not be tested as him.
+    const { p } = await run({ ...LONDON_BRIEF, existingChoices: [{ slot: "artist_music", name: "Big Tex" }] }, { choiceCountry: "India" });
+    for (const id of ["user", "agent"]) {
+      const a = p.candidates.find((c) => c.candidateId === id)!.plan.components.find((c) => c.slot === "artist_music")!;
+      expect(a).toMatchObject({ label: "Big Tex", resolution: "ambiguous", entity: null, origin: "user_provided" });
+    }
+    expect(p.verdict.humanChecks.join(" ")).toMatch(/Big Tex/);
+  });
+
   it("6. model-suggested anchors may be broadened; anchors the user named may not", async () => {
     const hypo = await run({ ...LONDON_BRIEF, audienceAnchors: [] }, { anchors: [{ name: "Nobody Known", country: "UK" }] });
     expect(hypo.calls.some((c) => c.system.startsWith("Suggest broader, established audience anchors"))).toBe(true);

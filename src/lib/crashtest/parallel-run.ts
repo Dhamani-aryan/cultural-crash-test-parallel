@@ -11,7 +11,17 @@ import { buildEvidenceMatrix, claimsOf, type MatrixContext } from "./matrix";
 import { QueryRequestSchema, parseQuery, type QueryRequest } from "./query";
 import { repairDirection, repairEntity, type DraftTrial } from "./repair";
 import type { RunDeps, RunOptions } from "./run";
-import { agentAlternatives, buildUserTrack, freezeBrief, generateAgentTrack, generateLlmDraft, measurementAnchors, resolveLlmTrack, type TrackPlan } from "./tracks";
+import {
+  agentAlternatives,
+  buildUserTrack,
+  freezeBrief,
+  generateAgentTrack,
+  generateLlmDraft,
+  measurementAnchors,
+  resolveLlmTrack,
+  userChoiceCountries,
+  type TrackPlan,
+} from "./tracks";
 import {
   DEPTHS,
   LaunchBriefSchema,
@@ -250,7 +260,11 @@ export async function runParallelCrashTest(
 
     stage("tracks", "Building three plans independently: yours as given, the LLM's alone, and the evidence-first agent's");
     const t0 = Date.now();
-    const userP = timed("user", () => buildUserTrack({ llm: llmFor("user"), ctx: ctxFor("user"), brief, anchors }));
+    // The user's named acts and brands get the same namesake protection as any name: their
+    // countries come from the brief alone, once, shared by every track that keeps them.
+    const userP = timed("shared", () => userChoiceCountries(llmFor("shared"), brief, market)).then((countries) =>
+      timed("user", () => buildUserTrack({ llm: llmFor("user"), ctx: ctxFor("user"), brief, anchors, countries })),
+    );
     const llmP = timed("llm", async () => {
       const draft = await generateLlmDraft(llmFor("llm"), frozen, market);
       return resolveLlmTrack({ llm: llmFor("llm"), ctx: ctxFor("llm"), brief, draft, anchors });

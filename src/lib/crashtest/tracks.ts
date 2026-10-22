@@ -115,6 +115,32 @@ export async function measurementAnchors(input: {
   };
 }
 
+// ---------- where the user's named choices are from ----------
+
+const countriesSchema = z.object({
+  choices: z.array(z.object({ name: z.string(), country: z.string() })).describe("each named act or brand, with the country it is from"),
+});
+
+export const CHOICE_COUNTRIES_SYSTEM =
+  "For each music act or brand named below, say which country it is from, so the right one is looked up when names collide (two acts called the same thing). Use the brief's city as context. Copy each name exactly. If you don't know, give an empty country.";
+
+/**
+ * The country of each act or brand the user named, from the brief alone, so the user's choices
+ * get the same namesake protection as every other name ("Divine" the Mumbai rapper, not the
+ * American performer). Shared, and resolved once: every track sees the same entity for them.
+ */
+export async function userChoiceCountries(llm: LlmClient, brief: LaunchBrief, market: Market): Promise<Map<string, string>> {
+  const named = brief.existingChoices.filter((c) => c.slot === "artist_music" || c.slot === "brand_collaboration");
+  if (!named.length) return new Map();
+  const { data } = await generateStructured(llm, {
+    schema: countriesSchema,
+    system: CHOICE_COUNTRIES_SYSTEM,
+    prompt: `City: ${market.label}\nNamed:\n${named.map((c) => `- ${c.name}`).join("\n")}`,
+    label: "choices:countries",
+  });
+  return new Map(data.choices.filter((c) => c.country.trim()).map((c) => [c.name.trim().toLowerCase(), c.country.trim()]));
+}
+
 // ---------- a track's output ----------
 
 export interface TrackPlan {
@@ -135,6 +161,8 @@ export async function buildUserTrack(input: {
   ctx: GatherContext;
   brief: LaunchBrief;
   anchors: EntityRef[];
+  /** Name (lower case) → country, for namesake protection (see userChoiceCountries). */
+  countries?: Map<string, string>;
 }): Promise<TrackPlan> {
   const { llm, ctx, brief, anchors } = input;
   const components: Component[] = [];
@@ -151,7 +179,9 @@ export async function buildUserTrack(input: {
       }
       components.push(direction);
     } else {
-      components.push(await resolveEntityComponent(ctx.client, choice.slot, choice.name, ctx.market, meta));
+      components.push(
+        await resolveEntityComponent(ctx.client, choice.slot, choice.name, ctx.market, meta, undefined, input.countries?.get(choice.name.trim().toLowerCase())),
+      );
     }
   }
   ctx.ledger.add({
