@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryCache } from "@/lib/cache/cache";
 import type { RunEvent, RunState } from "@/lib/crashtest/types";
+import { runVersionFor } from "@/lib/crashtest/version";
 import { eventStream, handleCrashTest, runKey, RUN_VERSION } from "@/lib/server/handlers";
 import { LONDON_BRIEF, worldClient, worldLlm } from "../crashtest/world";
 
@@ -78,6 +79,28 @@ describe("handleCrashTest", () => {
     });
     const events = await readEvents(await handleCrashTest(post({ intake: confirmed }), world));
     expect(events.at(-1)?.type).toBe("done");
+  });
+
+  it("23. keeps validation, the limiter and recording under the parallel architecture", async () => {
+    process.env.RECOMMENDATION_ARCHITECTURE = "parallel";
+    try {
+      expect((await handleCrashTest(post({ brief: { marketId: "london" } }), noDeps)).status).toBe(400);
+      const { intakeFromBrief } = await import("@/lib/intake/validate");
+      expect((await handleCrashTest(post({ intake: intakeFromBrief(LONDON_BRIEF, "x", "t1") }), noDeps)).status).toBe(400);
+      const refuse = async () => new Response("slow down", { status: 429 });
+      expect((await handleCrashTest(post({ brief: LONDON_BRIEF }), noDeps, () => createMemoryCache(10, new Map()), refuse)).status).toBe(429);
+
+      const cache = createMemoryCache(10, new Map());
+      const live = await readEvents(await handleCrashTest(post({ brief: LONDON_BRIEF }), world, () => cache));
+      const done = (e: RunEvent[]) => (e.at(-1) as Extract<RunEvent, { type: "done" }>).state;
+      expect(done(live).architecture).toBe("parallel");
+      expect(done(live).provenance).toMatchObject({ mode: "live", runVersion: runVersionFor("parallel") });
+      const replayed = await readEvents(await handleCrashTest(post({ brief: LONDON_BRIEF }), noDeps, () => cache));
+      expect(done(replayed).provenance).toMatchObject({ mode: "recorded", runVersion: runVersionFor("parallel") });
+      expect(done(replayed).parallel?.verdict).toEqual(done(live).parallel?.verdict);
+    } finally {
+      delete process.env.RECOMMENDATION_ARCHITECTURE;
+    }
   });
 
   it("refuses a live run when the limiter says so, but never a replay", async () => {

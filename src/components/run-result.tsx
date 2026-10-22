@@ -5,6 +5,7 @@ import { useState } from "react";
 import { agentReceipt, briefConstants, buildDecisions, summarizeRun, type AgentReceipt, type RunSummary } from "@/lib/crashtest/explain";
 import { STEPS } from "@/lib/crashtest/judge-graph";
 import { STOP_LABEL, type RunState, type Slot } from "@/lib/crashtest/types";
+import { ParallelRunResult } from "./parallel-result";
 import { AuditDetails, ComparisonTable } from "./plan-comparison";
 
 const EARLY = new Set(["user_cancelled", "error", "api_budget_limit", "insufficient_data"]);
@@ -106,6 +107,11 @@ const JudgeGraphView = dynamic(() => import("./judge-graph-view"), {
 });
 
 export function RunResult({ state }: { state: RunState }) {
+  if (state.architecture === "parallel") return <ParallelRunResult state={state} />;
+  return <SequentialRunResult state={state} />;
+}
+
+function SequentialRunResult({ state }: { state: RunState }) {
   const [view, setView] = useState<ResultView>("table");
   const [focus, setFocus] = useState<Slot | null>(null);
   const [step, setStep] = useState<number | null>(null);

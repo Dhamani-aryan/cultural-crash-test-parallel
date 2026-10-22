@@ -1,5 +1,6 @@
 import type { LlmClient } from "@/lib/llm/types";
 import { OUTCOME_LABEL, comparePlans } from "./compare";
+import { toParallelMarkdown } from "./parallel-view";
 import {
   DIMENSION_LABEL,
   SLOT_LABEL,
@@ -60,6 +61,7 @@ function planTable(plan: CulturalPlan | null): string {
 }
 
 export function toMarkdown(state: RunState): string {
+  if (state.architecture === "parallel") return toParallelMarkdown(state);
   const last = finalEvaluation(state);
   const first = state.evaluations[0];
   const ledger = new Map(state.evidenceLedger.map((r) => [r.evidenceId, r]));
