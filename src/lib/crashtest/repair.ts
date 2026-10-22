@@ -660,7 +660,6 @@ export async function repairEntity(input: {
       reason: "Top-ranked screened candidate (the model's pick wasn't on the list).",
       expectedEffect: data.choices[0].expectedEffect,
     });
-  const evidenceIds = [...listIds, ...(proposalRecordId ? [proposalRecordId] : []), screenRecord.evidenceId];
   const tried = picks.slice(0, MAX_TRIALS);
   for (const c of shortlist) {
     const t = screened.get(c.entity.id)!;
@@ -682,7 +681,8 @@ export async function repairEntity(input: {
     },
     reason: c.proposed ? `${reason} (Suggested by the agent, then scored in Qloo.)` : reason,
     expectedEffect,
-    evidenceIds,
+    // Only the views this candidate appeared in, its own scoring if it was a suggestion, and the screen.
+    evidenceIds: [...screened.get(c.entity.id)!.evidenceIds],
     considered: shortlist.map((x) => x.entity.displayName),
   })));
 }

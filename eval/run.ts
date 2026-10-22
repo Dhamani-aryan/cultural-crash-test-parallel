@@ -23,7 +23,7 @@ import { gatherEvidence } from "../src/lib/crashtest/gather";
 import { createLedger } from "../src/lib/crashtest/ledger";
 import { findInMarket, toRef } from "../src/lib/crashtest/plan";
 import { runCrashTest } from "../src/lib/crashtest/run";
-import type { CulturalPlan, PlanEvaluation, RunState } from "../src/lib/crashtest/types";
+import type { CandidateTrial, CulturalPlan, PlanEvaluation, RunState } from "../src/lib/crashtest/types";
 import { getQlooEnv } from "../src/lib/env";
 import { getLlmEnv } from "../src/lib/env";
 import { createChatGptLlm, getLlm } from "../src/lib/llm";
@@ -129,11 +129,49 @@ export interface CaseRow {
     ms: number;
     usage?: Usage;
     changes: { slot: string; before: string; after: string; reverted: boolean; outcome?: string }[];
+    /** Every candidate considered, with its views, fused rank, screen result and re-test: the run's candidate provenance. */
+    trials?: TrialRow[];
     /** Counted from the finished run; see eval/report.ts for how each is used. */
     metrics?: Metrics;
   };
   error: string | null;
 }
+
+export interface TrialRow {
+  iteration: number;
+  slot: string;
+  name: string;
+  source: CandidateTrial["source"];
+  views?: CandidateTrial["views"];
+  fusedRank?: number;
+  audienceRank?: number;
+  localityResult?: string;
+  roleFit?: number;
+  briefFit: CandidateTrial["briefFit"];
+  screenedOutReason?: string;
+  retest?: { accepted: boolean; rejectionCode?: string; slotStatus: string; slotScore: [number | null, number | null]; supported: [number, number] };
+}
+
+const trialRow = (t: CandidateTrial): TrialRow => ({
+  iteration: t.iteration,
+  slot: t.slot,
+  name: t.name,
+  source: t.source,
+  views: t.views,
+  fusedRank: t.fusedRank,
+  audienceRank: t.audienceRank,
+  localityResult: t.localityResult,
+  roleFit: t.roleFit,
+  briefFit: t.briefFit,
+  screenedOutReason: t.screenedOutReason,
+  retest: t.retest && {
+    accepted: t.retest.accepted,
+    rejectionCode: t.retest.rejectionCode,
+    slotStatus: `${t.retest.slotStatusBefore} → ${t.retest.slotStatusAfter}`,
+    slotScore: [t.retest.slotScoreBefore ?? null, t.retest.slotScoreAfter ?? null],
+    supported: [t.retest.supportedBefore, t.retest.supportedAfter],
+  },
+});
 
 const scored = (e: PlanEvaluation): Scored => ({
   supported: e.supported,
@@ -216,6 +254,7 @@ async function runCase(qloo: QlooClient, c: EvalCase): Promise<CaseRow> {
     ms,
     changes: state.changes.map((x) => ({ slot: x.slot, before: x.before, after: x.after, reverted: Boolean(x.reverted), outcome: x.retest ? (x.retest.accepted ? "accepted" : x.retest.rejectionCode) : undefined })),
     metrics: metricsOf(state),
+    trials: (state.trials ?? []).map(trialRow),
   };
   const base = {
     id: c.id,
@@ -299,6 +338,6 @@ for (const c of CASES.filter((x) => only.length === 0 || only.includes(x.id))) {
   const ordered = CASES.flatMap((x) => (rows.has(x.id) ? [rows.get(x.id)!] : []));
   writeFileSync(
     FILE,
-    JSON.stringify({ ranAt: new Date().toISOString(), runVersion: RUN_VERSION, ranking: RANKING, frozen: FROZEN ?? null, model: agentLlm.model, cases: ordered }, null, 2),
+    JSON.stringify({ ranAt: new Date().toISOString(), runVersion: RUN_VERSION, ranking: RANKING, frozen: FROZEN ?? null, model: agentLlm.model, judgeModel: judgeLlm.model, cases: ordered }, null, 2),
   );
 }

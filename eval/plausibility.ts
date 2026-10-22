@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import type { LaunchBriefInput, Slot } from "../src/lib/crashtest/types";
+import type { PlausibilityTally } from "./summary";
 
 /**
  * Plausibility cases: does the agent's final choice still make cultural sense for the job, or
@@ -40,6 +42,98 @@ export interface PlausibilityReview {
   /** One sentence. */
   reason: string;
   reviewer: string;
+}
+
+/**
+ * A fingerprint of what a case tests (brief, slot, expectation). A result row recorded under a
+ * different fingerprint is stale: the case changed after it ran, so its outcome and grade don't apply.
+ */
+export const caseKey = (c: Pick<PlausibilityCase, "brief" | "slot" | "expect">) =>
+  createHash("sha256").update(JSON.stringify({ brief: c.brief, slot: c.slot, expect: c.expect })).digest("hex").slice(0, 16);
+
+/** One case's outcome in a plausibility run (eval/plausibility-run.ts writes these). */
+export interface PlausibilityRow {
+  id: string;
+  /** `caseKey` of the case as it was when this row ran; absent in rows written before it was recorded. */
+  caseKey?: string;
+  reviewed: boolean;
+  expect: "keep" | "replace_ok";
+  original: string | null;
+  final: string | null;
+  changed: boolean;
+  /** "keep" cases: the original survived. "replace_ok" cases: always true (credibility is graded by hand). */
+  expectationHeld: boolean;
+  flagged: boolean;
+  status: string | null;
+  review: PlausibilityReview | null;
+  error: string | null;
+}
+
+export interface PlausibilityFile {
+  ranAt: string;
+  runVersion?: string;
+  ranking?: string;
+  /** The agent's model; absent in files written before it was recorded. */
+  model?: string;
+  rows: PlausibilityRow[];
+}
+
+const VERDICTS = new Set<string>(["credible", "questionable", "implausible"]);
+const isGraded = (r: PlausibilityReview | null | undefined): r is PlausibilityReview =>
+  !!r && VERDICTS.has(r.verdict) && !!r.reason?.trim() && !!r.reviewer?.trim();
+
+/**
+ * Check a plausibility run against the current cases and the run it vouches for (B). Every
+ * current case needs exactly one row that ran without error under the current case definition,
+ * from the same agent version, ranking and model as B. Only valid rows count, and only for cases
+ * a person has reviewed and whose outcome a person has graded in full.
+ */
+export function checkPlausibility(
+  file: PlausibilityFile,
+  cases: Pick<PlausibilityCase, "id" | "brief" | "slot" | "expect" | "reviewed">[],
+  run: { runVersion?: string; ranking?: string; model?: string },
+): { problems: string[]; tally: PlausibilityTally } {
+  const problems: string[] = [];
+  const meta = (what: string, x: string | undefined, want: string | undefined) => {
+    if (!x || !want) problems.push(`Plausibility run's ${what} not recorded (run: ${x ?? "missing"}, B: ${want ?? "missing"}).`);
+    else if (x !== want) problems.push(`Plausibility run is stale: ${what} ${x}, B ${want}.`);
+  };
+  meta("agent version", file.runVersion, run.runVersion);
+  meta("ranking", file.ranking, run.ranking);
+  meta("agent model", file.model, run.model);
+  const rows = Array.isArray(file.rows) ? file.rows : [];
+  const ids = new Set(rows.map((r) => r.id));
+  const known = new Set(cases.map((c) => c.id));
+  for (const id of ids) if (!known.has(id)) problems.push(`Plausibility row for an unknown case: ${id}.`);
+  let graded = 0;
+  let implausible = 0;
+  let valid = 0;
+  for (const c of cases) {
+    const mine = rows.filter((r) => r.id === c.id);
+    if (!mine.length) {
+      problems.push(`Plausibility case ${c.id} has no row.`);
+      continue;
+    }
+    if (mine.length > 1) {
+      problems.push(`Plausibility case ${c.id} has ${mine.length} rows.`);
+      continue;
+    }
+    const [r] = mine;
+    if (r.error || r.final === null) {
+      problems.push(`Plausibility case ${c.id} errored: ${r.error ?? "no final choice"}.`);
+      continue;
+    }
+    if (r.caseKey !== caseKey(c)) {
+      problems.push(`Plausibility case ${c.id} is stale: ${r.caseKey ? "the case changed after it ran" : "its case fingerprint was not recorded"}.`);
+      continue;
+    }
+    valid++;
+    if (r.review && !isGraded(r.review)) problems.push(`Plausibility case ${c.id} has an incomplete grade (needs verdict, reason and reviewer).`);
+    if (!c.reviewed || !isGraded(r.review)) continue;
+    graded++;
+    if (r.review.verdict === "implausible") implausible++;
+  }
+  return { problems, tally: { cases: cases.length, rows: rows.length, uniqueIds: ids.size, valid, graded, implausible, problems: problems.length } };
 }
 
 const base = { brandAttributes: [], constraints: [], depth: "thorough" as const };

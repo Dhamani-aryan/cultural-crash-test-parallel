@@ -105,14 +105,33 @@ export function summaryRows(s: RunSummary): [string, string][] {
   ];
 }
 
-/** The merge gates for experiment B against current agent A. `pass: null` means the gate isn't active yet. */
+/** The merge gates for experiment B against current agent A. Every gate is required; `pass: null` means not yet decidable. */
 export interface Gate {
   name: string;
   pass: boolean | null;
   detail: string;
 }
 
-export function gates(sa: RunSummary, sb: RunSummary, plaus: number | null, reviewedCases: number): Gate[] {
+/** B's plausibility run as checked by `checkPlausibility` (eval/plausibility.ts). */
+export interface PlausibilityTally {
+  /** Current plausibility cases. */
+  cases: number;
+  /** Rows in the run, and the distinct case ids among them. */
+  rows: number;
+  uniqueIds: number;
+  /** Cases with exactly one current, error-free row. */
+  valid: number;
+  /** Valid cases a person reviewed and graded in full, and how many of those were graded implausible. */
+  graded: number;
+  implausible: number;
+  /** Validation problems found (each is listed as a blocker). */
+  problems: number;
+}
+
+const plausibilityComplete = (p: PlausibilityTally) =>
+  p.problems === 0 && p.rows === p.cases && p.uniqueIds === p.cases && p.valid === p.cases && p.graded === p.cases;
+
+export function gates(sa: RunSummary, sb: RunSummary, plaus: PlausibilityTally | null): Gate[] {
   const within = (x: number, base: number) => base === 0 || x <= base * 1.25;
   return [
     { name: "Zero hard-constraint violations", pass: sb.violations === null ? null : sb.violations === 0, detail: `B: ${sb.violations ?? "not measured"}` },
@@ -125,8 +144,11 @@ export function gates(sa: RunSummary, sb: RunSummary, plaus: number | null, revi
     { name: "No reduction in total held-out support", pass: sb.heldOutFinal >= sa.heldOutFinal && sb.slots === sa.slots, detail: `A ${sa.heldOutFinal}/${sa.slots}, B ${sb.heldOutFinal}/${sb.slots}` },
     {
       name: "No reviewed plausibility case implausible",
-      pass: reviewedCases === 0 ? null : plaus === null ? null : plaus === 0,
-      detail: reviewedCases === 0 ? "no case has been human-reviewed yet: gate not yet active" : plaus === null ? "no graded plausibility run for B" : `B: ${plaus}`,
+      // Any implausible grade fails. Passing needs a fully valid run with every case reviewed and graded by a person.
+      pass: plaus && plaus.implausible > 0 ? false : plaus && plausibilityComplete(plaus) ? true : null,
+      detail: !plaus
+        ? "no plausibility run for B: human gate not active"
+        : `${plaus.rows} rows, ${plaus.uniqueIds} unique case ids, ${plaus.valid} of ${plaus.cases} cases valid, ${plaus.graded} of ${plaus.cases} human-reviewed and graded, ${plaus.implausible} implausible${plaus.problems ? `, ${plaus.problems} validation problem(s)` : ""}${plausibilityComplete(plaus) || plaus.implausible ? "" : ": human gate not active"}`,
     },
     {
       name: "No material cost or latency regression (≤ 25% more)",
@@ -134,4 +156,75 @@ export function gates(sa: RunSummary, sb: RunSummary, plaus: number | null, revi
       detail: `Qloo checks A ${sa.qlooChecks}, B ${sb.qlooChecks}; median A ${Math.round(sa.medianMs / 1000)} s, B ${Math.round(sb.medianMs / 1000)} s`,
     },
   ];
+}
+
+/** What a results file records about how it was produced (eval/run.ts writes it). */
+export interface RunFile {
+  ranAt: string;
+  runVersion?: string;
+  ranking?: string;
+  frozen?: string | null;
+  /** The agent's model. */
+  model?: string;
+  /** The judges' model; absent in files written before it was recorded. */
+  judgeModel?: string;
+  cases: CaseRow[];
+}
+
+/**
+ * Why two runs can't support a merge decision, however their gates come out: they must start from
+ * the same frozen baseline, cover exactly the expected cases, be fully scored, and differ only in
+ * what is under test (same agent version, agent model and judge model).
+ */
+export function comparisonBlockers(
+  a: RunFile,
+  b: RunFile,
+  ctx: { expectedCaseIds: string[]; baseline: { id: string; caseIds: string[] } | null },
+): string[] {
+  const out: string[] = [];
+  const runs = [["A", a], ["B", b]] as const;
+  for (const [k, r] of runs) if (!r.frozen) out.push(`${k} is a live run, not from a frozen baseline.`);
+  if (a.frozen && b.frozen && a.frozen !== b.frozen) out.push(`Different baselines: A ${a.frozen}, B ${b.frozen}.`);
+  if (a.frozen && a.frozen === b.frozen && ctx.baseline?.id !== a.frozen) out.push(`Baseline ${a.frozen} was not found.`);
+  const same = (what: string, x: string | undefined, y: string | undefined) => {
+    if (!x || !y) out.push(`${what} not recorded (A: ${x ?? "missing"}, B: ${y ?? "missing"}).`);
+    else if (x !== y) out.push(`Different ${what.toLowerCase()}: A ${x}, B ${y}.`);
+  };
+  same("Agent version", a.runVersion, b.runVersion);
+  same("Agent model", a.model, b.model);
+  same("Judge model", a.judgeModel, b.judgeModel);
+  const sets: [string, string[]][] = [["expected", ctx.expectedCaseIds], ...(ctx.baseline ? [["baseline", ctx.baseline.caseIds] as [string, string[]]] : [])];
+  for (const [k, r] of runs) {
+    const ids = r.cases.map((c) => c.id);
+    const dup = ids.filter((id, i) => ids.indexOf(id) !== i);
+    if (dup.length) out.push(`${k} repeats case(s): ${[...new Set(dup)].join(", ")}.`);
+    for (const [name, want] of sets) {
+      const missing = want.filter((id) => !ids.includes(id));
+      const extra = ids.filter((id) => !want.includes(id));
+      if (missing.length) out.push(`${k} is missing ${name} case(s): ${missing.join(", ")}.`);
+      if (extra.length) out.push(`${k} has case(s) not in the ${name} set: ${extra.join(", ")}.`);
+    }
+    for (const c of r.cases) {
+      const gaps = [c.error && `error: ${c.error}`, !c.inRun && "no in-run score", !c.heldOut && "no held-out score", !c.evidenceJudge && "no evidence-judge verdict"].filter(Boolean);
+      if (gaps.length) out.push(`${k} ${c.id} is not fully scored (${gaps.join("; ")}).`);
+    }
+  }
+  return out;
+}
+
+export interface Decision {
+  verdict: "merge_b" | "keep_a" | "incomplete";
+  text: string;
+}
+
+/** B may be merged only on a valid comparison where every required gate is exactly true. */
+export function decide(gs: Gate[], blockers: string[]): Decision {
+  const failed = gs.filter((g) => g.pass === false).length;
+  const open = gs.filter((g) => g.pass === null).length;
+  if (failed) return { verdict: "keep_a", text: `Decision: keep A (${failed} required gate(s) failed${blockers.length ? "; the comparison is also invalid for merging" : ""}).` };
+  if (open || blockers.length) {
+    const why = [open && `${open} required gate(s) undecided`, blockers.length && `${blockers.length} validity problem(s)`].filter(Boolean).join(", ");
+    return { verdict: "incomplete", text: `Decision: incomplete; do not merge B (${why}).` };
+  }
+  return { verdict: "merge_b", text: "Decision: every required gate passed on a valid comparison; B may be merged." };
 }
