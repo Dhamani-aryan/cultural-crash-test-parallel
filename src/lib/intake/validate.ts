@@ -14,14 +14,32 @@ export function marketFromText(cityText: string): string | null {
   const k = nameKey(cityText);
   if (!k) return null;
   const m = TARGET_MARKETS.find(
-    (x) => nameKey(x.label) === k || nameKey(x.qlooLocation) === k || k.includes(nameKey(x.label)),
+    (x) =>
+      nameKey(x.label) === k ||
+      nameKey(x.qlooLocation) === k ||
+      k.includes(nameKey(x.label)) ||
+      (x.locationAliases ?? []).some((alias) => nameKey(alias) === k),
   );
   return m?.id ?? null;
 }
 
+/** All supported markets named in a longer message. Used only when exactly one is unambiguous. */
+export function marketsFromText(text: string): string[] {
+  const k = nameKey(text);
+  if (!k) return [];
+  return TARGET_MARKETS.filter((market) =>
+    [market.label, market.qlooLocation, ...(market.locationAliases ?? [])].some((name) =>
+      k.includes(nameKey(name)),
+    ),
+  ).map((market) => market.id);
+}
+
 /** Audience counts only once the user wrote it, or picked or confirmed a suggestion. */
 export function audienceConfirmed(state: Pick<IntakeState, "brief" | "origins">): boolean {
-  return state.brief.audienceDescription.trim().length >= 3 && state.origins.audienceDescription !== "model_suggested";
+  return (
+    state.brief.audienceDescription.trim().length >= 3 &&
+    state.origins.audienceDescription !== "model_suggested"
+  );
 }
 
 export function cityConflict(brief: IntakeBrief): boolean {
@@ -32,7 +50,9 @@ export function cityConflict(brief: IntakeBrief): boolean {
   return fromText !== brief.marketId;
 }
 
-export function missingFields(state: Pick<IntakeState, "brief" | "origins"> & { delegated?: boolean }): CriticalField[] {
+export function missingFields(
+  state: Pick<IntakeState, "brief" | "origins"> & { delegated?: boolean },
+): CriticalField[] {
   const b = state.brief;
   // Once the user hands the rest over, only what can't be assumed is required: what they sell
   // and the city. Everything else the assistant filled in is listed as an assumption.
@@ -51,7 +71,9 @@ export function missingFields(state: Pick<IntakeState, "brief" | "origins"> & { 
   if (b.launchGoal.trim().length < 2) missing.push("launchGoal");
   if (!marketById(b.marketId)) missing.push("marketId");
   if (!audienceConfirmed(state)) missing.push("audience");
-  if (!b.brandAttributes.length) missing.push("brandContext");
+  // A positioning rule ("not another celebrity launch", "keep it local") is usable brand
+  // context even when the extractor did not repeat it as an attribute.
+  if (!b.brandAttributes.length && !b.otherRules.length) missing.push("brandContext");
   return missing;
 }
 
@@ -75,21 +97,45 @@ export function refresh(state: IntakeState): IntakeState {
  * The confirmed intake as a crash-test brief. Locks become hard lock constraints, exclusions
  * become machine-checked exclusions, other rules are carried as text.
  */
-export function toLaunchBrief(state: IntakeState, depth: "quick" | "thorough" = "thorough"): LaunchBriefInput {
+export function toLaunchBrief(
+  state: IntakeState,
+  depth: "quick" | "thorough" = "thorough",
+): LaunchBriefInput {
   const b = state.brief;
   const constraints: Constraint[] = [];
   for (const c of b.choices.filter((x) => x.locked))
-    constraints.push({ id: `lock-${c.slot}`, kind: "hard", lockSlot: c.slot, description: `Keep the ${SLOT_LABEL[c.slot].toLowerCase()}: ${c.name}` });
+    constraints.push({
+      id: `lock-${c.slot}`,
+      kind: "hard",
+      lockSlot: c.slot,
+      description: `Keep the ${SLOT_LABEL[c.slot].toLowerCase()}: ${c.name}`,
+    });
   if (b.exclude.length)
-    constraints.push({ id: "exclude", kind: "hard", excludeNames: b.exclude, description: `Never use: ${b.exclude.join(", ")}` });
-  b.otherRules.forEach((r, i) => constraints.push({ id: `rule-${i}`, kind: "hard", description: r }));
+    constraints.push({
+      id: "exclude",
+      kind: "hard",
+      excludeNames: b.exclude,
+      description: `Never use: ${b.exclude.join(", ")}`,
+    });
+  b.otherRules.forEach((r, i) =>
+    constraints.push({ id: `rule-${i}`, kind: "hard", description: r }),
+  );
   return {
     brandName: b.brandName || undefined,
     productCategory: b.productCategory,
     launchGoal: b.launchGoal,
+    sourceText:
+      state.messages
+        .filter((message) => message.role === "user")
+        .map((message) => message.text.trim())
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, 4000) || undefined,
     marketId: b.marketId,
     audienceDescription: b.audienceDescription,
-    audienceAnchors: b.audienceAnchors,
+    // Suggested anchors are hypotheses, not user commitments. Let the planner propose and, if
+    // necessary, broaden measurable anchors; explicit user anchors remain protected.
+    audienceAnchors: state.origins.audienceAnchors === "model_suggested" ? [] : b.audienceAnchors,
     brandAttributes: b.brandAttributes,
     budgetBand: b.budgetBand || undefined,
     existingChoices: b.choices.map(({ slot, name }) => ({ slot, name })),
@@ -112,8 +158,14 @@ export function infersSensitiveTrait(text: string): boolean {
  * An intake built straight from a structured brief (home-page examples): every field counts as
  * the user's, choices keep their locks, and the user still has to confirm before a run.
  */
-export function intakeFromBrief(brief: LaunchBriefInput, text: string, intakeId: string): IntakeState {
-  const locked = new Set((brief.constraints ?? []).flatMap((c) => (c.kind === "hard" && c.lockSlot ? [c.lockSlot] : [])));
+export function intakeFromBrief(
+  brief: LaunchBriefInput,
+  text: string,
+  intakeId: string,
+): IntakeState {
+  const locked = new Set(
+    (brief.constraints ?? []).flatMap((c) => (c.kind === "hard" && c.lockSlot ? [c.lockSlot] : [])),
+  );
   const b: IntakeBrief = {
     brandName: brief.brandName ?? "",
     productCategory: brief.productCategory,
@@ -127,7 +179,9 @@ export function intakeFromBrief(brief: LaunchBriefInput, text: string, intakeId:
     website: brief.website ?? "",
     choices: (brief.existingChoices ?? []).map((c) => ({ ...c, locked: locked.has(c.slot) })),
     exclude: (brief.constraints ?? []).flatMap((c) => c.excludeNames ?? []),
-    otherRules: (brief.constraints ?? []).filter((c) => !c.lockSlot && !c.excludeNames?.length).map((c) => c.description),
+    otherRules: (brief.constraints ?? [])
+      .filter((c) => !c.lockSlot && !c.excludeNames?.length)
+      .map((c) => c.description),
     exploreUserChoices: brief.exploreUserChoices ?? false,
   };
   const origins = Object.fromEntries(Object.keys(b).map((k) => [k, "user_supplied" as const]));
@@ -137,7 +191,12 @@ export function intakeFromBrief(brief: LaunchBriefInput, text: string, intakeId:
     mode: "validate_plan",
     messages: [
       { id: "u1", role: "user", text, createdAt: now },
-      { id: "a2", role: "assistant", text: "Here's the example as a brief. Check it, edit anything, then confirm.", createdAt: now },
+      {
+        id: "a2",
+        role: "assistant",
+        text: "Here's the example as a brief. Check it, edit anything, then confirm.",
+        createdAt: now,
+      },
     ],
     brief: b,
     origins,

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { DOMAINS, TARGET_MARKETS, confidence, gradeFromCoverage } from "@/lib/markets";
+import {
+  DOMAINS,
+  TARGET_MARKETS,
+  confidence,
+  contrastLocation,
+  gradeFromCoverage,
+  marketById,
+  sourceLocations,
+} from "@/lib/markets";
 
 describe("markets", () => {
   it("grades media by distinctiveness and places by category depth", () => {
@@ -17,5 +25,11 @@ describe("markets", () => {
       // A launch market must be usable in most domains, or it shouldn't be a launch market.
       expect(grades.filter((g) => g !== "off").length).toBeGreaterThanOrEqual(4);
     }
+  });
+
+  it("supports New York without comparing it with itself", () => {
+    const market = marketById("new-york")!;
+    expect(contrastLocation(market)).toBe("London");
+    expect(sourceLocations(market)).not.toContain("New York City");
   });
 });

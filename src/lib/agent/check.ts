@@ -8,7 +8,7 @@ import {
 import { isForeignOrigin, originCountries } from "@/lib/engine/origin";
 import { categoryTags, roleSimilarity, roleTags } from "@/lib/engine/role";
 import { mapLimit, nameKey } from "@/lib/engine/stats";
-import { CONTROL_LOCATIONS, SOURCE_LOCATIONS, type Domain, type Market } from "@/lib/markets";
+import { controlLocations, sourceLocations, type Domain, type Market } from "@/lib/markets";
 import type { QlooClient, QlooEntity } from "@/lib/qloo";
 import { domainOf } from "./resolve";
 
@@ -16,7 +16,7 @@ import { domainOf } from "./resolve";
  * One set of checks for any local pick, whoever made it (the engine or the model alone), so
  * the comparison and the evaluation judge both sides by the same Qloo evidence:
  * - local evidence: in the city's own taste list for that kind (and category);
- * - familiar in the source: in a US city's list too, so it isn't a translation;
+ * - familiar in the source: in another US city's list too, so it isn't a translation;
  * - global: in the lists of two or more other cities, or a worldwide superstar;
  * - foreign: its known origin is another country;
  * - from here: its origin, release country or location is the target country;
@@ -34,7 +34,7 @@ export interface PickCheck {
   familiarInSource: boolean;
   global: boolean;
   role: number | null;
-  /** Passes every locality check: a known, local, non-US, non-global entity. */
+  /** Passes every locality check for the target market. */
   local: boolean;
 }
 
@@ -88,11 +88,9 @@ export async function checkPick(
     const category = categoryTags(pick, domain);
     const key = (e: QlooEntity) => (domain === "place" ? placeKey(e.name) : e.id);
     const me = key(pick);
-    const controls = CONTROL_LOCATIONS.filter((c) => c !== market.qlooLocation).slice(
-      0,
-      CONTROL_COUNT,
-    );
-    const cities = [market.qlooLocation, ...controls, ...SOURCE_LOCATIONS];
+    const controls = controlLocations(market, CONTROL_COUNT);
+    const sources = sourceLocations(market);
+    const cities = [market.qlooLocation, ...controls, ...sources];
     const lists = await mapLimit(cities, 3, (city) => cityList(client, domain, city, category));
     localEvidence = lists[0].some((e) => e.id === pick.id || key(e) === me);
     const controlHits = lists

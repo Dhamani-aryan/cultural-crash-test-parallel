@@ -31,9 +31,11 @@ export interface Market {
   language: string;
   /** ISO 639-1 codes of the city's languages, to pick the local title of a show or film. */
   languageCodes: string[];
+  /** Common districts that still unambiguously identify this supported city during intake. */
+  locationAliases?: string[];
 }
 
-/** The source side: content written for a US audience. */
+/** The default comparison side for launches outside New York. */
 export const SOURCE_MARKET: Market = {
   id: "us",
   qlooLocation: "New York City",
@@ -41,10 +43,20 @@ export const SOURCE_MARKET: Market = {
   country: "US",
   releaseCountryNames: ["United States", "United States of America"],
   language: "English",
-    languageCodes: ["en"],
+  languageCodes: ["en"],
 };
 
 export const TARGET_MARKETS: Market[] = [
+  {
+    id: "new-york",
+    qlooLocation: "New York City",
+    label: "New York",
+    country: "US",
+    releaseCountryNames: ["United States", "United States of America"],
+    language: "English",
+    languageCodes: ["en"],
+    locationAliases: ["NYC", "Manhattan", "Lower East Side", "Brooklyn", "SoHo"],
+  },
   {
     id: "tokyo",
     qlooLocation: "Tokyo",
@@ -53,6 +65,7 @@ export const TARGET_MARKETS: Market[] = [
     releaseCountryNames: ["Japan"],
     language: "Japanese",
     languageCodes: ["ja"],
+    locationAliases: ["Omotesando", "Shimokitazawa", "Shibuya", "Harajuku"],
   },
   {
     id: "london",
@@ -62,6 +75,7 @@ export const TARGET_MARKETS: Market[] = [
     releaseCountryNames: ["United Kingdom"],
     language: "British English",
     languageCodes: ["en"],
+    locationAliases: ["Dalston", "Marylebone", "Shoreditch", "East London"],
   },
   {
     id: "mumbai",
@@ -90,16 +104,82 @@ export const TARGET_MARKETS: Market[] = [
     language: "Spanish",
     languageCodes: ["es"],
   },
+  {
+    id: "mexico-city",
+    qlooLocation: "Mexico City",
+    label: "Mexico City",
+    country: "MX",
+    releaseCountryNames: ["Mexico"],
+    language: "Spanish",
+    languageCodes: ["es"],
+    locationAliases: ["CDMX", "Roma Norte", "Condesa", "Polanco"],
+  },
+  {
+    id: "toronto",
+    qlooLocation: "Toronto",
+    label: "Toronto",
+    country: "CA",
+    releaseCountryNames: ["Canada"],
+    language: "English",
+    languageCodes: ["en"],
+    locationAliases: ["Queen West", "Ossington", "Yorkville"],
+  },
+  {
+    id: "sydney",
+    qlooLocation: "Sydney",
+    label: "Sydney",
+    country: "AU",
+    releaseCountryNames: ["Australia"],
+    language: "English",
+    languageCodes: ["en"],
+    locationAliases: ["Surry Hills", "Newtown", "Paddington"],
+  },
+  {
+    id: "paris",
+    qlooLocation: "Paris",
+    label: "Paris",
+    country: "FR",
+    releaseCountryNames: ["France"],
+    language: "French",
+    languageCodes: ["fr"],
+    locationAliases: ["Le Marais", "Canal Saint-Martin", "Montmartre"],
+  },
+  {
+    id: "berlin",
+    qlooLocation: "Berlin",
+    label: "Berlin",
+    country: "DE",
+    releaseCountryNames: ["Germany"],
+    language: "German",
+    languageCodes: ["de"],
+    locationAliases: ["Kreuzberg", "Neukölln", "Mitte"],
+  },
 ];
 
 /** Cities used as the "everywhere else" baseline when measuring how local a candidate is. */
 export const CONTROL_LOCATIONS = ["London", "Tokyo", "Mumbai", "São Paulo", "Paris", "Madrid"];
 
-/**
- * US cities whose distinctive lists define "already familiar to the source audience". An
- * equivalent the US audience already has (In-N-Out, Jamba Juice) isn't a localization.
- */
+/** US cities used to detect choices already familiar in the default source market. */
 export const SOURCE_LOCATIONS = ["New York City", "Los Angeles", "Chicago", "San Francisco"];
+
+/**
+ * The cultural contrast used by the direction and proposal-skew checks. New York is normally
+ * the source-market baseline; a New York launch uses London so it is never compared with itself.
+ */
+export function contrastLocation(market: Market): string {
+  return market.qlooLocation === SOURCE_MARKET.qlooLocation ? "London" : SOURCE_MARKET.qlooLocation;
+}
+
+/** Control cities for a market, with the target and duplicates removed before applying a limit. */
+export function controlLocations(market: Market, take?: number): string[] {
+  const locations = [...new Set(CONTROL_LOCATIONS.filter((city) => city !== market.qlooLocation))];
+  return take === undefined ? locations : locations.slice(0, take);
+}
+
+/** US familiarity controls, excluding the target when the launch itself is in a US source city. */
+export function sourceLocations(market: Market): string[] {
+  return [...new Set(SOURCE_LOCATIONS.filter((city) => city !== market.qlooLocation))];
+}
 
 type CityCoverage = Record<string, { distinct?: number; categoryDepth?: number }>;
 

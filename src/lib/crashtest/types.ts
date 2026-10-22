@@ -42,12 +42,14 @@ export const LaunchBriefSchema = z.object({
   brandName: z.string().trim().max(80).optional(),
   productCategory: z.string().trim().min(2).max(120),
   launchGoal: z.string().trim().min(2).max(200),
+  /** The user's own confirmed description, preserved so structured extraction cannot erase nuance. */
+  sourceText: z.string().trim().max(4000).optional(),
   /** One of the supported market ids (src/lib/markets.ts). */
   marketId: z.string(),
   audienceDescription: z.string().trim().min(3).max(400),
   /** Names of brands or artists that stand for the audience. Optional: the agent proposes them. */
   audienceAnchors: z.array(z.string().trim().min(1)).max(4).default([]),
-  brandAttributes: z.array(z.string().trim().min(1).max(40)).max(8).default([]),
+  brandAttributes: z.array(z.string().trim().min(1).max(120)).max(8).default([]),
   budgetBand: z.string().trim().max(60).optional(),
   existingChoices: z
     .array(z.object({ slot: z.enum(SLOTS), name: z.string().trim().min(1).max(120) }))

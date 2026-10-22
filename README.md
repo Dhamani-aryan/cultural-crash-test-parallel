@@ -96,7 +96,7 @@ npm run dev                  # http://localhost:3000
 
 ## Supported cities
 
-London, Tokyo, São Paulo, Madrid and Mumbai. These are the cities where we measured Qloo's data as deep and city-specific enough to trust ([`data/coverage.json`](data/coverage.json), [`docs/DECISIONS.md`](docs/DECISIONS.md)).
+New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydney, Paris and Berlin. These are the cities where we measured Qloo's artist, brand and place data as deep and city-specific enough for Cultural Crash Test ([`data/coverage.json`](data/coverage.json)). New York uses London as its direction contrast so it is never compared with itself.
 
 ## Honest limits
 

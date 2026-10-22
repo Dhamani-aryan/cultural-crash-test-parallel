@@ -1,10 +1,16 @@
 import { checkPick } from "@/lib/agent/check";
 import type { Ranking } from "./version";
 import { mapLimit, nameKey } from "@/lib/engine/stats";
-import { SOURCE_MARKET, type Market } from "@/lib/markets";
+import { contrastLocation, type Market } from "@/lib/markets";
 import type { InsightsInput, InsightsResult, QlooClient } from "@/lib/qloo";
 import { coverageOf, itemsFrom, sanitizeInsights, type Ledger } from "./ledger";
-import { SLOT_TYPE, type Component, type CulturalPlan, type EvidenceRecord, type Slot } from "./types";
+import {
+  SLOT_TYPE,
+  type Component,
+  type CulturalPlan,
+  type EvidenceRecord,
+  type Slot,
+} from "./types";
 
 /**
  * Evidence gathering: every Qloo query that feeds the evaluator goes through here and lands
@@ -13,7 +19,10 @@ import { SLOT_TYPE, type Component, type CulturalPlan, type EvidenceRecord, type
 
 export const LIST_SIZE = 50;
 /** Creative direction is tested against these Qloo tag families. */
-export const DIRECTION_TAG_TYPES = ["urn:tag:aesthetic_property:qloo", "urn:tag:emotional_tone:qloo"];
+export const DIRECTION_TAG_TYPES = [
+  "urn:tag:aesthetic_property:qloo",
+  "urn:tag:emotional_tone:qloo",
+];
 
 /** Where one item sits in one Qloo list. */
 export interface ListHit {
@@ -47,6 +56,8 @@ export interface TagLocal {
   tag: string;
   cityRank?: number;
   sourceRank?: number;
+  /** The comparison city; normally New York, but London for a New York launch. */
+  sourceLocation?: string;
 }
 
 export interface ComponentEvidence {
@@ -90,11 +101,15 @@ async function insights(
       coverageStatus: "error",
       warnings: [err instanceof Error ? err.message : String(err)],
     });
-    return { result: { entities: [], tags: [], aggregateExplainability: null, durationMs: null }, record };
+    return {
+      result: { entities: [], tags: [], aggregateExplainability: null, durationMs: null },
+      record,
+    };
   }
   const count = result.entities.length + result.tags.length;
   if (input.explainability && count > 0 && !result.entities.some((e) => e.explainability))
-    if (input.filterType !== "urn:tag") warnings.push("Explainability was requested but not returned.");
+    if (input.filterType !== "urn:tag")
+      warnings.push("Explainability was requested but not returned.");
   const record = ctx.ledger.add({
     purpose,
     queryKind: "insights",
@@ -102,7 +117,11 @@ async function insights(
     qlooEntityIds: [...(input.signalEntities ?? []), ...focus],
     results: itemsFrom(result, focus),
     resultCount: count,
-    coverageStatus: input.resultEntities ? (count ? "usable" : "empty") : coverageOf(count, input.take ?? LIST_SIZE),
+    coverageStatus: input.resultEntities
+      ? count
+        ? "usable"
+        : "empty"
+      : coverageOf(count, input.take ?? LIST_SIZE),
     warnings,
   });
   return { result, record };
@@ -132,7 +151,9 @@ async function entityHit(
   const id = c.entity!.id;
   const base = entityQuery(c, ctx.market, signal);
   const { result, record } = await insights(ctx, purpose, base, [id]);
-  const found = result.entities.find((e) => e.id === id || nameKey(e.name) === nameKey(c.entity!.name));
+  const found = result.entities.find(
+    (e) => e.id === id || nameKey(e.name) === nameKey(c.entity!.name),
+  );
   if (found) {
     return {
       evidenceId: record.evidenceId,
@@ -169,13 +190,17 @@ export async function tagList(
   purpose: string,
 ): Promise<{ tags: InsightsResult["tags"]; record: EvidenceRecord }[]> {
   return mapLimit(DIRECTION_TAG_TYPES, 2, async (t) => {
-    const { result, record } = await insights(ctx, `${purpose}: ${t.split(":")[2].replace("_", " ")}`, {
-      filterType: "urn:tag",
-      filterTagTypes: [t],
-      signalEntities: signal,
-      signalLocationQuery: location,
-      take: LIST_SIZE,
-    });
+    const { result, record } = await insights(
+      ctx,
+      `${purpose}: ${t.split(":")[2].replace("_", " ")}`,
+      {
+        filterType: "urn:tag",
+        filterTagTypes: [t],
+        signalEntities: signal,
+        signalLocationQuery: location,
+        take: LIST_SIZE,
+      },
+    );
     return { tags: result.tags, record };
   });
 }
@@ -194,7 +219,8 @@ function tagHits(lists: Awaited<ReturnType<typeof tagList>>, c: Component): List
           returned: true,
         };
     }
-    const family = lists.find((l) => l.tags.some((x) => tag.id.startsWith(x.subtype ?? "-"))) ?? lists[0];
+    const family =
+      lists.find((l) => l.tags.some((x) => tag.id.startsWith(x.subtype ?? "-"))) ?? lists[0];
     return {
       evidenceId: family.record.evidenceId,
       inList: false,
@@ -234,7 +260,9 @@ async function locality(ctx: GatherContext, c: Component): Promise<LocalFinding 
       entity: c.entity!.id,
     },
     qlooEntityIds: [c.entity!.id],
-    results: [{ id: c.entity!.id, name: c.entity!.name, popularity: full?.popularity ?? undefined }],
+    results: [
+      { id: c.entity!.id, name: c.entity!.name, popularity: full?.popularity ?? undefined },
+    ],
     resultCount: 1,
     coverageStatus: check.found ? "usable" : "empty",
     warnings: check.found ? [] : ["Full record not found."],
@@ -264,16 +292,27 @@ export async function gatherEvidence(
 
   // Tag lists are shared by the creative-direction checks.
   const direction = resolved.find((c) => c.slot === "creative_direction" && c.tags.length);
+  const contrast = contrastLocation(ctx.market);
   const dirLists = direction
     ? {
         audience: anchors.length
-          ? await tagList(ctx, anchors, ctx.market.qlooLocation, `What this audience in ${ctx.market.label} leans to`)
+          ? await tagList(
+              ctx,
+              anchors,
+              ctx.market.qlooLocation,
+              `What this audience in ${ctx.market.label} leans to`,
+            )
           : null,
         source: anchors.length
-          ? await tagList(ctx, anchors, SOURCE_MARKET.qlooLocation, "The same audience in New York, for contrast")
+          ? await tagList(ctx, anchors, contrast, `The same audience in ${contrast}, for contrast`)
           : null,
         package: entityIds.length
-          ? await tagList(ctx, entityIds, ctx.market.qlooLocation, `What the plan's other choices lean to in ${ctx.market.label}`)
+          ? await tagList(
+              ctx,
+              entityIds,
+              ctx.market.qlooLocation,
+              `What the plan's other choices lean to in ${ctx.market.label}`,
+            )
           : null,
       }
     : null;
@@ -294,7 +333,8 @@ export async function gatherEvidence(
     if (c.slot === "creative_direction") {
       if (dirLists?.audience) ev.audience = tagHits(dirLists.audience, c);
       // An empty package list means nothing to test against, not "outside the top 0".
-      if (dirLists?.package?.some((l) => l.tags.length)) ev.coherence = tagHits(dirLists.package, c);
+      if (dirLists?.package?.some((l) => l.tags.length))
+        ev.coherence = tagHits(dirLists.package, c);
       if (dirLists?.audience && dirLists.source) {
         const city = tagHits(dirLists.audience, c);
         const src = tagHits(dirLists.source, c);
@@ -303,6 +343,7 @@ export async function gatherEvidence(
           tag: t.name,
           cityRank: city[i].rank,
           sourceRank: src[i].rank,
+          sourceLocation: contrast,
         }));
       }
       return;
@@ -311,7 +352,10 @@ export async function gatherEvidence(
     const e = c.entity!;
     const dup =
       plan.components.find(
-        (o) => o !== c && o.entity && (o.entity.id === e.id || nameKey(o.entity.name) === nameKey(e.name)),
+        (o) =>
+          o !== c &&
+          o.entity &&
+          (o.entity.id === e.id || nameKey(o.entity.name) === nameKey(e.name)),
       ) ?? null;
     // An anchor as a choice (DIVINE headlining for DIVINE's fans) is a fit, not a repeat.
     ev.duplicateOf = dup ? dup.label : null;
@@ -333,7 +377,12 @@ export async function gatherEvidence(
           )
         : null,
       others.length
-        ? entityHit(ctx, c, others, `Does ${e.name} fit the rest of the plan in ${ctx.market.label}?`)
+        ? entityHit(
+            ctx,
+            c,
+            others,
+            `Does ${e.name} fit the rest of the plan in ${ctx.market.label}?`,
+          )
         : null,
       locality(ctx, c),
     ]);

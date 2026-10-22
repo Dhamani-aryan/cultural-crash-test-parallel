@@ -5,7 +5,7 @@ import { countriesIn, originCountries } from "@/lib/engine/origin";
 import { mapLimit, nameKey } from "@/lib/engine/stats";
 import { generateStructured } from "@/lib/llm/structured";
 import type { LlmClient } from "@/lib/llm/types";
-import { SOURCE_MARKET, TARGET_MARKETS, type Market } from "@/lib/markets";
+import { SOURCE_MARKET, type Market } from "@/lib/markets";
 import type { QlooClient, QlooEntity } from "@/lib/qloo";
 import { tagList, type GatherContext } from "./gather";
 import {
@@ -47,11 +47,17 @@ const draftSchema = z.object({
     .array(z.string())
     .describe("2-4 brands or artists, by exact name, whose fans are the target audience"),
   artist: z.string().describe("music act for the launch, exact name"),
-  brand: z.string().describe("collaboration brand: another existing brand, never the launching brand itself; exact name"),
+  brand: z
+    .string()
+    .describe(
+      "collaboration brand: another existing brand, never the launching brand itself; exact name",
+    ),
   venue: z.string().describe("pop-up venue in the city, exact name as it is known"),
   venueCategory: z.enum(PLACE_CATEGORIES),
   direction: z.string().describe("creative direction in a few words: aesthetic and tone"),
-  assumptions: z.array(z.string()).describe("assumptions you made because the brief left something open"),
+  assumptions: z
+    .array(z.string())
+    .describe("assumptions you made because the brief left something open"),
   countries: z
     .object({
       anchors: z.array(z.string()).describe("country of each audience anchor, in the same order"),
@@ -63,24 +69,37 @@ const draftSchema = z.object({
 });
 export type Draft = z.infer<typeof draftSchema>;
 
+const fallbackAnchorsSchema = z.object({
+  anchors: z
+    .array(z.object({ name: z.string(), country: z.string() }))
+    .describe("3-4 established brands or artists whose fans match the described audience"),
+});
+
 const DRAFT_SYSTEM = `You are a brand strategist planning a launch. Draft the cultural choices for the brief: a music act, a collaboration brand, a pop-up venue in the city and a creative direction, plus 2-4 brands or artists whose fans stand for the target audience. Use real, specific names exactly as they are usually written. Keep any choice the brief already makes. Never include a name the brief excludes. List the assumptions you made where the brief is silent. For each audience anchor, the act and the brand, give the country it is from, so the right one is looked up. Do not mention data sources.`;
 
 export function briefText(brief: LaunchBrief, market: Market): string {
   const lines = [
     `Brand: ${brief.brandName || "(unnamed)"} — ${brief.productCategory}`,
     `Goal: ${brief.launchGoal}`,
+    brief.sourceText ? `User's original description: ${brief.sourceText}` : "",
     `City: ${market.label}`,
     `Audience: ${brief.audienceDescription}`,
     brief.audienceAnchors.length ? `Audience is fans of: ${brief.audienceAnchors.join(", ")}` : "",
     brief.brandAttributes.length ? `Brand attributes: ${brief.brandAttributes.join(", ")}` : "",
     brief.budgetBand ? `Budget: ${brief.budgetBand}` : "",
     ...brief.existingChoices.map((c) => `Already chosen (${c.slot}): ${c.name}`),
-    ...brief.constraints.map((c) => `${c.kind === "hard" ? "Hard" : "Soft"} constraint: ${c.description}`),
+    ...brief.constraints.map(
+      (c) => `${c.kind === "hard" ? "Hard" : "Soft"} constraint: ${c.description}`,
+    ),
   ];
   return lines.filter(Boolean).join("\n");
 }
 
-export async function draftPlan(llm: LlmClient, brief: LaunchBrief, market: Market): Promise<Draft> {
+export async function draftPlan(
+  llm: LlmClient,
+  brief: LaunchBrief,
+  market: Market,
+): Promise<Draft> {
   const { data } = await generateStructured(llm, {
     schema: draftSchema,
     system: DRAFT_SYSTEM,
@@ -121,9 +140,15 @@ export async function findInMarket(
 ): Promise<QlooEntity | null> {
   const k = nameKey(name);
   const hits = (
-    await Promise.all(domains.map((d) => client.searchEntities({ query: name, types: [`urn:entity:${d}`], take: 8 })))
+    await Promise.all(
+      domains.map((d) =>
+        client.searchEntities({ query: name, types: [`urn:entity:${d}`], take: 8 }),
+      ),
+    )
   ).flat();
-  const exact = hits.filter((h) => [h.name, h.displayName, ...h.akas].some((n) => nameKey(n) === k)).slice(0, 6);
+  const exact = hits
+    .filter((h) => [h.name, h.displayName, ...h.akas].some((n) => nameKey(n) === k))
+    .slice(0, 6);
   if (!exact.length) return null;
   const full = await client.getEntities([...new Set(exact.map((h) => h.id))]);
   const records = exact.map((h) => full.find((f) => f.id === h.id) ?? h);
@@ -213,7 +238,8 @@ export async function resolveEntityComponent(
     resolution: e ? "resolved" : "not_found",
     entity: e ? toRef(e) : null,
     tags: [],
-    placeCategory: slot === "event_place" ? (e ? categoryOf(e, venueCategory) : placeTag(venueCategory)) : null,
+    placeCategory:
+      slot === "event_place" ? (e ? categoryOf(e, venueCategory) : placeTag(venueCategory)) : null,
   };
 }
 
@@ -225,19 +251,21 @@ const tagSchema = z.object({
 });
 
 /**
- * The words Qloo uses for aesthetics and tone. The vocabulary comes from the audience's lists
- * in every supported city and New York, so mapping a direction doesn't favour the target city.
+ * The words Qloo uses for aesthetics and tone. A fixed, geographically diverse reference panel
+ * keeps the vocabulary stable as launch markets are added and prevents expansion increasing the
+ * cost of every run.
  */
 export async function directionVocabulary(
   ctx: GatherContext,
   anchors: string[],
 ): Promise<Map<string, TagRef>> {
-  const cities = [...TARGET_MARKETS.map((m) => m.qlooLocation), SOURCE_MARKET.qlooLocation];
+  const cities = ["Tokyo", "London", "Mumbai", "São Paulo", "Madrid", SOURCE_MARKET.qlooLocation];
   const lists = await mapLimit(cities, 2, (city) =>
     tagList(ctx, anchors, city, `Vocabulary: what this audience leans to in ${city}`),
   );
   const vocab = new Map<string, TagRef>();
-  for (const { tags } of lists.flat()) for (const t of tags) vocab.set(nameKey(t.name), { id: t.id, name: t.name });
+  for (const { tags } of lists.flat())
+    for (const t of tags) vocab.set(nameKey(t.name), { id: t.id, name: t.name });
   return vocab;
 }
 
@@ -274,33 +302,91 @@ export async function buildPlan(input: {
     if (!e) notes.push(`Audience anchor "${name}" isn't in Qloo and was left out.`);
     const other = e ? namesake(e, draft.countries?.anchors[i]) : null;
     if (other) {
-      notes.push(`Audience anchor "${name}" was left out: Qloo only has a different one (${other}).`);
+      notes.push(
+        `Audience anchor "${name}" was left out: Qloo only has a different one (${other}).`,
+      );
       return null;
     }
     return e;
   });
-  const anchors = anchorHits.filter((e): e is QlooEntity => e !== null).map(toRef);
+  let anchors = anchorHits.filter((e): e is QlooEntity => e !== null).map(toRef);
   ctx.ledger.add({
     purpose: "Resolve the audience anchors to Qloo entities",
     queryKind: "search",
     sanitizedRequest: { queries: draft.anchors, types: ["urn:entity:brand", "urn:entity:artist"] },
     qlooEntityIds: anchors.map((a) => a.id),
-    results: anchors.map((a) => ({ id: a.id, name: a.name, type: a.type ?? undefined, popularity: a.popularity ?? undefined })),
+    results: anchors.map((a) => ({
+      id: a.id,
+      name: a.name,
+      type: a.type ?? undefined,
+      popularity: a.popularity ?? undefined,
+    })),
     resultCount: anchors.length,
     coverageStatus: anchors.length >= 2 ? "usable" : anchors.length ? "partial" : "empty",
     warnings: notes.slice(),
   });
 
-  const locked = (slot: Slot) => brief.constraints.some((c) => c.kind === "hard" && c.lockSlot === slot);
+  // When the user supplied only a natural-language audience and every model-proposed anchor is
+  // absent from Qloo, make one bounded attempt with broader anchors. Never substitute anchors the
+  // user explicitly named, and never continue if the fallback also has no measurable entities.
+  if (!anchors.length && !brief.audienceAnchors.length) {
+    const { data } = await generateStructured(llm, {
+      schema: fallbackAnchorsSchema,
+      system:
+        "Suggest broader, established audience anchors for measurement. Use real brands or music artists with exact commonly used names. They must represent the audience described, not the launch venue or the launching brand. Avoid the failed names. Return 3-4 names and each one's country.",
+      prompt: `${briefText(brief, ctx.market)}\n\nFailed anchors: ${draft.anchors.join(", ")}`,
+      label: "anchors:fallback",
+    });
+    const fallbackHits = await mapLimit(data.anchors.slice(0, 4), 2, async ({ name, country }) => {
+      const entity = await findInMarket(ctx.client, name, ["brand", "artist"], ctx.market);
+      return entity && !namesake(entity, country) ? entity : null;
+    });
+    anchors = fallbackHits.filter((e): e is QlooEntity => e !== null).map(toRef);
+    const tried = data.anchors.map((a) => a.name);
+    ctx.ledger.add({
+      purpose: "Retry unresolved audience anchors with broader measurable references",
+      queryKind: "search",
+      sanitizedRequest: { queries: tried, types: ["urn:entity:brand", "urn:entity:artist"] },
+      qlooEntityIds: anchors.map((a) => a.id),
+      results: anchors.map((a) => ({
+        id: a.id,
+        name: a.name,
+        type: a.type ?? undefined,
+        popularity: a.popularity ?? undefined,
+      })),
+      resultCount: anchors.length,
+      coverageStatus: anchors.length >= 2 ? "usable" : anchors.length ? "partial" : "empty",
+      warnings: anchors.length ? [] : ["The broader fallback anchors were also absent from Qloo."],
+    });
+    if (anchors.length)
+      notes.push(
+        `Broader audience anchors were used because Qloo didn't know ${draft.anchors.join(", ")}.`,
+      );
+  }
+
+  const locked = (slot: Slot) =>
+    brief.constraints.some((c) => c.kind === "hard" && c.lockSlot === slot);
   const meta = (slot: Slot) => ({
-    origin: brief.existingChoices.some((c) => c.slot === slot) ? ("user_provided" as const) : input.origin,
+    origin: brief.existingChoices.some((c) => c.slot === slot)
+      ? ("user_provided" as const)
+      : input.origin,
     locked: locked(slot),
   });
   const ownBrand = brief.brandName ? nameKey(brief.brandName) : null;
   if (ownBrand && nameKey(draft.brand) === ownBrand)
-    notes.push(`The draft named the launching brand itself as its collaborator; that isn't a choice to test.`);
+    notes.push(
+      `The draft named the launching brand itself as its collaborator; that isn't a choice to test.`,
+    );
   const [artist, brandResolved, venue] = await Promise.all([
-    resolveEntityComponent(ctx.client, "artist_music", draft.artist, ctx.market, meta("artist_music"), undefined, draft.countries?.artist),
+    resolveEntityComponent(
+      ctx.client,
+      "artist_music",
+      draft.artist,
+      ctx.market,
+      meta("artist_music"),
+      undefined,
+      draft.countries?.artist,
+    ),
     resolveEntityComponent(
       ctx.client,
       "brand_collaboration",
@@ -310,7 +396,14 @@ export async function buildPlan(input: {
       undefined,
       draft.countries?.brand,
     ),
-    resolveEntityComponent(ctx.client, "event_place", draft.venue, ctx.market, meta("event_place"), draft.venueCategory),
+    resolveEntityComponent(
+      ctx.client,
+      "event_place",
+      draft.venue,
+      ctx.market,
+      meta("event_place"),
+      draft.venueCategory,
+    ),
   ]);
   const brand: Component =
     ownBrand && nameKey(draft.brand) === ownBrand
@@ -325,7 +418,9 @@ export async function buildPlan(input: {
       types: ["urn:entity:artist", "urn:entity:brand", "urn:entity:place"],
     },
     qlooEntityIds: resolved.flatMap((c) => (c.entity ? [c.entity.id] : [])),
-    results: resolved.flatMap((c) => (c.entity ? [{ id: c.entity.id, name: c.entity.name, type: c.entity.type ?? undefined }] : [])),
+    results: resolved.flatMap((c) =>
+      c.entity ? [{ id: c.entity.id, name: c.entity.name, type: c.entity.type ?? undefined }] : [],
+    ),
     resultCount: resolved.filter((c) => c.entity).length,
     coverageStatus: resolved.every((c) => c.entity) ? "usable" : "partial",
     warnings: resolved.filter((c) => !c.entity).map((c) => `"${c.label}" not found in Qloo.`),
@@ -341,9 +436,16 @@ export async function buildPlan(input: {
     placeCategory: null,
   };
   if (anchors.length) {
-    const vocab = await directionVocabulary(ctx, anchors.map((a) => a.id));
+    const vocab = await directionVocabulary(
+      ctx,
+      anchors.map((a) => a.id),
+    );
     const mapped = await mapDirection(llm, draft.direction, vocab);
-    direction = { ...direction, tags: mapped.tags, resolution: mapped.tags.length ? "resolved" : "not_found" };
+    direction = {
+      ...direction,
+      tags: mapped.tags,
+      resolution: mapped.tags.length ? "resolved" : "not_found",
+    };
     if (mapped.note) notes.push(`Creative direction: ${mapped.note}`);
   }
   const components = [artist, brand, venue, direction];
@@ -352,4 +454,3 @@ export async function buildPlan(input: {
     notes,
   };
 }
-

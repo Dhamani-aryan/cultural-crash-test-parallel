@@ -5,7 +5,7 @@ import { categoryTags, kindLabel, roleSimilarity, roleTags } from "@/lib/engine/
 import { mapLimit, nameKey } from "@/lib/engine/stats";
 import { generateStructured } from "@/lib/llm/structured";
 import type { LlmClient } from "@/lib/llm/types";
-import { CONTROL_LOCATIONS, SOURCE_LOCATIONS, type Domain } from "@/lib/markets";
+import { controlLocations, sourceLocations, type Domain } from "@/lib/markets";
 import type { QlooEntity } from "@/lib/qloo";
 import { LIST_SIZE, tagList, type GatherContext } from "./gather";
 import { itemsFrom, sanitizeInsights } from "./ledger";
@@ -33,7 +33,9 @@ export const VIEW_TAKE = 25;
 export const RRF_K = 60;
 
 /** Reciprocal rank fusion: each list adds 1 / (k + rank). Ranks are combined, not raw affinities. */
-export function fuseRanks(lists: { view: CandidateView; ids: string[] }[]): Map<string, { score: number; views: Partial<Record<CandidateView, number>> }> {
+export function fuseRanks(
+  lists: { view: CandidateView; ids: string[] }[],
+): Map<string, { score: number; views: Partial<Record<CandidateView, number>> }> {
   const out = new Map<string, { score: number; views: Partial<Record<CandidateView, number>> }>();
   for (const { view, ids } of lists)
     ids.forEach((id, i) => {
@@ -90,15 +92,18 @@ async function screen(
   category: string[],
   entities: QlooEntity[],
 ): Promise<Map<string, { local: boolean; why: string }>> {
-  const controls = CONTROL_LOCATIONS.filter((c) => c !== ctx.market.qlooLocation).slice(0, CONTROL_COUNT);
-  const cities = [ctx.market.qlooLocation, ...controls, ...SOURCE_LOCATIONS];
+  const controls = controlLocations(ctx.market, CONTROL_COUNT);
+  const sources = sourceLocations(ctx.market);
+  const cities = [ctx.market.qlooLocation, ...controls, ...sources];
   const lists = await mapLimit(cities, 3, (city) => cityList(ctx.client, domain, city, category));
   const key = (e: QlooEntity) => (domain === "place" ? nameKey(e.name) : e.id);
   const out = new Map<string, { local: boolean; why: string }>();
   for (const e of entities) {
     const me = key(e);
     const inCity = lists[0].some((x) => key(x) === me);
-    const controlHits = lists.slice(1, 1 + controls.length).filter((l) => l.some((x) => key(x) === me)).length;
+    const controlHits = lists
+      .slice(1, 1 + controls.length)
+      .filter((l) => l.some((x) => key(x) === me)).length;
     const inSource = lists.slice(1 + controls.length).some((l) => l.some((x) => key(x) === me));
     const fromHere = isLocalOrigin(e, domain, ctx.market);
     const foreign = domain !== "place" && isForeignOrigin(e, ctx.market.country);
@@ -154,10 +159,18 @@ const EVENT_FORMATS = new Set(
   ].map((c) => `urn:tag:category:place:${c}`),
 );
 /** Food and drink venues suit only a food or drink launch. */
-const FOOD_VENUES = ["cafe", "coffee_shop", "restaurant", "bakery", "brewery", "brewpub", "beer_garden", "pub"].map(
-  (c) => `urn:tag:category:place:${c}`,
-);
-const FOOD_AND_DRINK = /coffee|caf[eé]|tea|food|drink|beer|brew|wine|spirit|bakery|restaurant|snack|chocolate|juice/i;
+const FOOD_VENUES = [
+  "cafe",
+  "coffee_shop",
+  "restaurant",
+  "bakery",
+  "brewery",
+  "brewpub",
+  "beer_garden",
+  "pub",
+].map((c) => `urn:tag:category:place:${c}`);
+const FOOD_AND_DRINK =
+  /coffee|caf[eé]|tea|food|drink|beer|brew|wine|spirit|bakery|restaurant|snack|chocolate|juice/i;
 
 export function isFoodAndDrink(productCategory: string): boolean {
   return FOOD_AND_DRINK.test(productCategory);
@@ -172,9 +185,13 @@ export function roleFits(
 ): boolean {
   if (slot === "event_place") {
     if (candidate.tags.some((t) => UNSUITABLE_VENUE.test(t.id))) return false;
-    const cats = candidate.tags.filter((t) => t.id.startsWith("urn:tag:category:place:")).map((t) => t.id);
+    const cats = candidate.tags
+      .filter((t) => t.id.startsWith("urn:tag:category:place:"))
+      .map((t) => t.id);
     // Event-format gate: the venue must be filed as a kind of place that can host the launch.
-    const canHost = cats.some((c) => EVENT_FORMATS.has(c) || (opts.foodAndDrink && FOOD_VENUES.includes(c)));
+    const canHost = cats.some(
+      (c) => EVENT_FORMATS.has(c) || (opts.foodAndDrink && FOOD_VENUES.includes(c)),
+    );
     if (!canHost) return false;
     return !placeCategory || cats.includes(placeCategory);
   }
@@ -190,9 +207,12 @@ export function roleFits(
 
 /** Words too generic to show a brand fits a brief ("fashion", "brand"). */
 const GENERIC = new Set(
-  "brand brands fashion clothing apparel label labels store stores shop goods product products wear streetwear casual lifestyle company the and for with from that this other".split(" "),
+  "brand brands fashion clothing apparel label labels store stores shop goods product products wear streetwear casual lifestyle company the and for with from that this other".split(
+    " ",
+  ),
 );
-const stem = (w: string) => w.replace(/(ability|ibility|able|ible|ity|ness|ing|ed|es|s)$/, "").slice(0, 7);
+const stem = (w: string) =>
+  w.replace(/(ability|ibility|able|ible|ity|ness|ing|ed|es|s)$/, "").slice(0, 7);
 function terms(text: string): Set<string> {
   return new Set(
     text
@@ -206,7 +226,9 @@ function terms(text: string): Set<string> {
 /** What Qloo says a candidate is: its description and its descriptive tags, not trade data. */
 function evidenceText(e: Pick<QlooEntity, "shortDescription" | "description" | "tags">): string {
   const tags = e.tags
-    .filter((t) => !/wikipedia_category|key_market|product_category|category:place/.test(t.type ?? t.id))
+    .filter(
+      (t) => !/wikipedia_category|key_market|product_category|category:place/.test(t.type ?? t.id),
+    )
     .map((t) => t.name ?? "");
   return [e.shortDescription ?? "", e.description ?? "", ...tags].join(" ");
 }
@@ -221,7 +243,10 @@ export function ruledOut(brief: Pick<LaunchBrief, "constraints">): string[] {
       const phrase = m[1]
         .toLowerCase()
         .replace(/[-_]/g, " ")
-        .replace(/\b(collaborators?|collaborations?|brands?|partners?|partnerships?|venues?|acts?|artists?|choices?)\b/g, "")
+        .replace(
+          /\b(collaborators?|collaborations?|brands?|partners?|partnerships?|venues?|acts?|artists?|choices?)\b/g,
+          "",
+        )
         .replace(/[^\p{L}\s]/gu, "")
         .replace(/\s+/g, " ")
         .trim();
@@ -252,7 +277,10 @@ export function fitsBrief(
 }
 
 const tagNames = (e: QlooEntity, prefix: string) =>
-  e.tags.filter((t) => t.id.startsWith(prefix) && t.name).map((t) => t.name!).slice(0, 3);
+  e.tags
+    .filter((t) => t.id.startsWith(prefix) && t.name)
+    .map((t) => t.name!)
+    .slice(0, 3);
 
 // ---------- candidate sources ----------
 
@@ -305,7 +333,9 @@ const rankSchema = z.object({
         reason: z.string().describe("one or two sentences citing the evidence given"),
         expectedEffect: z
           .string()
-          .describe("which test should improve in the re-test (audience affinity, local relevance or fit with the plan)"),
+          .describe(
+            "which test should improve in the re-test (audience affinity, local relevance or fit with the plan)",
+          ),
       }),
     )
     .describe("up to 3 candidates, best first; empty when none can do the job"),
@@ -333,7 +363,9 @@ export async function repairEntity(input: {
   const current = plan.components.find((c) => c.slot === slot)!;
   const domain = domainOf(slot);
   const place = slot === "event_place";
-  const others = plan.components.filter((c) => c.slot !== slot && c.entity).map((c) => c.entity!.id);
+  const others = plan.components
+    .filter((c) => c.slot !== slot && c.entity)
+    .map((c) => c.entity!.id);
   const signal = [...plan.anchors.map((a) => a.id), ...others];
   const bannedNames = [
     ...brief.constraints.flatMap((c) => (c.kind === "hard" ? (c.excludeNames ?? []) : [])),
@@ -343,7 +375,8 @@ export async function repairEntity(input: {
     current.label,
   ];
   const banned = new Set(bannedNames.map(nameKey));
-  const allowed = (e: QlooEntity) => !banned.has(nameKey(e.name)) && !banned.has(nameKey(e.displayName));
+  const allowed = (e: QlooEntity) =>
+    !banned.has(nameKey(e.name)) && !banned.has(nameKey(e.displayName));
 
   // Source 1: what this audience, with the rest of the plan, has affinity for in the city.
   const query = {
@@ -360,8 +393,13 @@ export async function repairEntity(input: {
   // intention separately, so a candidate's strength stays visible: audience fit, local relevance
   // and fit with the other choices, plus the agent's own proposals. Ranks are fused, not scores.
   const v2 = ctx.ranking === "v2";
-  const lists: { view: CandidateView; entities: (QlooEntity & { rank?: number })[]; evidenceId: string }[] = [];
-  const coverage = (n: number) => (n >= 10 ? ("usable" as const) : n ? ("partial" as const) : ("empty" as const));
+  const lists: {
+    view: CandidateView;
+    entities: (QlooEntity & { rank?: number })[];
+    evidenceId: string;
+  }[] = [];
+  const coverage = (n: number) =>
+    n >= 10 ? ("usable" as const) : n ? ("partial" as const) : ("empty" as const);
   const ask = async (view: CandidateView, purpose: string, q: typeof query) => {
     const r = await ctx.client.getInsights(q);
     const rec = ctx.ledger.add({
@@ -374,19 +412,35 @@ export async function repairEntity(input: {
       coverageStatus: coverage(r.entities.length),
       warnings: [],
     });
-    lists.push({ view, entities: r.entities as (QlooEntity & { rank?: number })[], evidenceId: rec.evidenceId });
+    lists.push({
+      view,
+      entities: r.entities as (QlooEntity & { rank?: number })[],
+      evidenceId: rec.evidenceId,
+    });
     return r;
   };
   const what = SLOT_LABEL[slot].toLowerCase();
   let rankOf: (aff: number) => number = () => 0;
   if (!v2) {
-    const result = await ask("combined", `Find ${what} candidates that fit this audience and the rest of the plan in ${ctx.market.label}`, query);
+    const result = await ask(
+      "combined",
+      `Find ${what} candidates that fit this audience and the rest of the plan in ${ctx.market.label}`,
+      query,
+    );
     const listAff = result.entities.map((e) => e.affinity ?? 0);
     rankOf = (aff: number) => 1 + listAff.filter((a) => a > aff).length;
   } else {
-    await ask("audience", `Find ${what} candidates for this audience in ${ctx.market.label}`, { ...query, signalEntities: plan.anchors.map((a) => a.id), take: VIEW_TAKE });
+    await ask("audience", `Find ${what} candidates for this audience in ${ctx.market.label}`, {
+      ...query,
+      signalEntities: plan.anchors.map((a) => a.id),
+      take: VIEW_TAKE,
+    });
     if (others.length) {
-      await ask("coherence", `Find ${what} candidates that fit the rest of the plan in ${ctx.market.label}`, { ...query, signalEntities: others, take: VIEW_TAKE });
+      await ask(
+        "coherence",
+        `Find ${what} candidates that fit the rest of the plan in ${ctx.market.label}`,
+        { ...query, signalEntities: others, take: VIEW_TAKE },
+      );
     } else {
       // Recorded, never simulated: there is nothing else in the plan to be coherent with.
       ctx.ledger.add({
@@ -402,12 +456,24 @@ export async function repairEntity(input: {
     }
     // Local relevance: the city's own list for this kind (the same list the locality screen reads).
     const [orig] = current.entity ? await ctx.client.getEntities([current.entity.id]) : [];
-    const cat = place && current.placeCategory ? [current.placeCategory] : orig ? categoryTags(orig, domain) : [];
-    const cityTop = (await cityList(ctx.client, domain, ctx.market.qlooLocation, cat)).slice(0, VIEW_TAKE);
+    const cat =
+      place && current.placeCategory
+        ? [current.placeCategory]
+        : orig
+          ? categoryTags(orig, domain)
+          : [];
+    const cityTop = (await cityList(ctx.client, domain, ctx.market.qlooLocation, cat)).slice(
+      0,
+      VIEW_TAKE,
+    );
     const rec = ctx.ledger.add({
       purpose: `${ctx.market.label}'s own top list for this kind of ${what}`,
       queryKind: "insights",
-      sanitizedRequest: { "filter.type": SLOT_TYPE[slot], "location.query": ctx.market.qlooLocation, "filter.tags": cat },
+      sanitizedRequest: {
+        "filter.type": SLOT_TYPE[slot],
+        "location.query": ctx.market.qlooLocation,
+        "filter.tags": cat,
+      },
       qlooEntityIds: [],
       results: cityTop.slice(0, 8).map((e, i) => ({ id: e.id, name: e.displayName, rank: i + 1 })),
       resultCount: cityTop.length,
@@ -449,7 +515,11 @@ export async function repairEntity(input: {
     // v1 places each proposal in the combined list; v2 ranks the proposals as their own view.
     const affs = scored.entities.flatMap((e) => (e.affinity !== null ? [e.affinity] : []));
     for (const e of scored.entities)
-      if (e.affinity !== null) proposalFit.set(e.id, { affinity: e.affinity, rank: v2 ? 1 + affs.filter((a) => a > e.affinity!).length : rankOf(e.affinity) });
+      if (e.affinity !== null)
+        proposalFit.set(e.id, {
+          affinity: e.affinity,
+          rank: v2 ? 1 + affs.filter((a) => a > e.affinity!).length : rankOf(e.affinity),
+        });
     proposalRecordId = ctx.ledger.add({
       purpose: `Score the agent's own ${SLOT_LABEL[slot].toLowerCase()} suggestions for this audience and plan in ${ctx.market.label}`,
       queryKind: "insights",
@@ -460,7 +530,9 @@ export async function repairEntity(input: {
       coverageStatus: scored.entities.length ? "usable" : "empty",
       warnings: [
         ...names.filter((_, i) => !found[i]).map((n) => `"${n}" isn't in Qloo.`),
-        ...proposals.filter((e) => !proposalFit.has(e.id)).map((e) => `No affinity returned for ${e.displayName}.`),
+        ...proposals
+          .filter((e) => !proposalFit.has(e.id))
+          .map((e) => `No affinity returned for ${e.displayName}.`),
       ],
     }).evidenceId;
   }
@@ -471,9 +543,18 @@ export async function repairEntity(input: {
   names.forEach((n, i) => {
     const e = found[i];
     const out = (screenedOutReason: string, entityId?: string) =>
-      trials.push({ slot, name: e?.displayName ?? n, entityId, source: "llm_proposal", evidenceIds: proposalIds, briefFit: "unknown", screenedOutReason });
+      trials.push({
+        slot,
+        name: e?.displayName ?? n,
+        entityId,
+        source: "llm_proposal",
+        evidenceIds: proposalIds,
+        briefFit: "unknown",
+        screenedOutReason,
+      });
     if (!e) out("Not found in Qloo");
-    else if (!allowed(e)) out("Excluded: ruled out by the brief, already tried, or already in the plan", e.id);
+    else if (!allowed(e))
+      out("Excluded: ruled out by the brief, already tried, or already in the plan", e.id);
     else if (!proposalFit.has(e.id)) out("No affinity returned for this audience", e.id);
   });
 
@@ -484,20 +565,38 @@ export async function repairEntity(input: {
   const fused = v2
     ? fuseRanks([
         ...lists.map((l) => ({ view: l.view, ids: l.entities.filter(allowed).map((e) => e.id) })),
-        { view: "proposals" as const, ids: [...scoredProposals].sort((a, b) => proposalFit.get(a.id)!.rank - proposalFit.get(b.id)!.rank).map((e) => e.id) },
+        {
+          view: "proposals" as const,
+          ids: [...scoredProposals]
+            .sort((a, b) => proposalFit.get(a.id)!.rank - proposalFit.get(b.id)!.rank)
+            .map((e) => e.id),
+        },
       ])
     : null;
-  const fusedOrder = fused ? [...fused].sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0])).map(([id]) => id) : [];
-  const entityOf = new Map<string, QlooEntity>([...lists.flatMap((l) => l.entities), ...scoredProposals].map((e) => [e.id, e as QlooEntity]));
+  const fusedOrder = fused
+    ? [...fused]
+        .sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]))
+        .map(([id]) => id)
+    : [];
+  const entityOf = new Map<string, QlooEntity>(
+    [...lists.flatMap((l) => l.entities), ...scoredProposals].map((e) => [e.id, e as QlooEntity]),
+  );
   const candidatesIn = v2
     ? fusedOrder.slice(0, SCREEN).map((id) => {
         const views = fused!.get(id)!.views;
         const e = entityOf.get(id)!;
-        return { e, rank: views.audience ?? views.proposals ?? views.coherence ?? views.local ?? SCREEN, proposed: views.proposals !== undefined };
+        return {
+          e,
+          rank: views.audience ?? views.proposals ?? views.coherence ?? views.local ?? SCREEN,
+          proposed: views.proposals !== undefined,
+        };
       })
     : [
         ...scoredProposals.map((e) => ({ e, rank: proposalFit.get(e.id)!.rank, proposed: true })),
-        ...lists[0].entities.filter(allowed).slice(0, SCREEN).map((e, i) => ({ e: e as QlooEntity, rank: e.rank ?? i + 1, proposed: false })),
+        ...lists[0].entities
+          .filter(allowed)
+          .slice(0, SCREEN)
+          .map((e, i) => ({ e: e as QlooEntity, rank: e.rank ?? i + 1, proposed: false })),
       ];
   for (const p of candidatesIn) {
     if (seen.has(p.e.id)) continue;
@@ -520,41 +619,47 @@ export async function repairEntity(input: {
   );
   const originalRole = original ? roleTags(original) : new Map<string, number>();
 
-  const candidates: (Candidate & { proposed: boolean; locality: string; briefOk: boolean })[] = records.map(({ e, rank, proposed }) => {
-    const l = { ...local.get(e.id)! };
-    const locality = l.why;
-    // The agent's venue suggestions may be of another kind than the draft's; only unsuitable venues are out.
-    const roleOk = roleFits(slot, e, original ?? null, proposed ? null : current.placeCategory, {
-      foodAndDrink: isFoodAndDrink(brief.productCategory),
+  const candidates: (Candidate & { proposed: boolean; locality: string; briefOk: boolean })[] =
+    records.map(({ e, rank, proposed }) => {
+      const l = { ...local.get(e.id)! };
+      const locality = l.why;
+      // The agent's venue suggestions may be of another kind than the draft's; only unsuitable venues are out.
+      const roleOk = roleFits(slot, e, original ?? null, proposed ? null : current.placeCategory, {
+        foodAndDrink: isFoodAndDrink(brief.productCategory),
+      });
+      // An upgrade replaces a choice nothing contradicts, so it must be a local pick: from the
+      // city's own country (venues: in it), whoever suggested it.
+      const upgradeOk = !input.upgrade || isLocalOrigin(e, domain, ctx.market);
+      // With no resolved original to compare against, a partner brand must fit the brief on evidence.
+      const briefFit = fitsBrief(e, brief, {
+        requireAttributes: slot === "brand_collaboration" && current.resolution !== "resolved",
+      });
+      const fits = roleOk && upgradeOk && briefFit.ok;
+      if (!roleOk)
+        l.why = place ? "not a venue of the planned kind" : "a different kind of business";
+      else if (!upgradeOk) l.why = "not from here (an upgrade must be a local pick)";
+      else if (!briefFit.ok) l.why = briefFit.why!;
+      const role = original
+        ? roleSimilarity(originalRole, roleTags(e))
+        : { score: 0, shared: [] as string[] };
+      const shared = role.shared.map(
+        (id) => kindLabel(id) ?? e.tags.find((t) => t.id === id)?.name ?? id,
+      );
+      const fit = Math.max(0, 1 - (rank - 1) / LIST_SIZE);
+      return {
+        entity: e,
+        fitRank: rank,
+        local: l.local && fits,
+        localWhy: l.why,
+        role: role.score,
+        sharedRole: shared,
+        proposed,
+        locality,
+        briefOk: briefFit.ok,
+        // v2 orders the shortlist by fused rank; v1 by its blended score.
+        score: fused ? fused.get(e.id)!.score : 0.5 * fit + 0.3 * role.score + (l.local ? 0.2 : 0),
+      };
     });
-    // An upgrade replaces a choice nothing contradicts, so it must be a local pick: from the
-    // city's own country (venues: in it), whoever suggested it.
-    const upgradeOk = !input.upgrade || isLocalOrigin(e, domain, ctx.market);
-    // With no resolved original to compare against, a partner brand must fit the brief on evidence.
-    const briefFit = fitsBrief(e, brief, {
-      requireAttributes: slot === "brand_collaboration" && current.resolution !== "resolved",
-    });
-    const fits = roleOk && upgradeOk && briefFit.ok;
-    if (!roleOk) l.why = place ? "not a venue of the planned kind" : "a different kind of business";
-    else if (!upgradeOk) l.why = "not from here (an upgrade must be a local pick)";
-    else if (!briefFit.ok) l.why = briefFit.why!;
-    const role = original ? roleSimilarity(originalRole, roleTags(e)) : { score: 0, shared: [] as string[] };
-    const shared = role.shared.map((id) => kindLabel(id) ?? e.tags.find((t) => t.id === id)?.name ?? id);
-    const fit = Math.max(0, 1 - (rank - 1) / LIST_SIZE);
-    return {
-      entity: e,
-      fitRank: rank,
-      local: l.local && fits,
-      localWhy: l.why,
-      role: role.score,
-      sharedRole: shared,
-      proposed,
-      locality,
-      briefOk: briefFit.ok,
-      // v2 orders the shortlist by fused rank; v1 by its blended score.
-      score: fused ? fused.get(e.id)!.score : 0.5 * fit + 0.3 * role.score + (l.local ? 0.2 : 0),
-    };
-  });
   const shortlist = candidates
     .filter((c) => c.local)
     .sort((a, b) => b.score - a.score)
@@ -575,7 +680,9 @@ export async function repairEntity(input: {
     })),
     resultCount: candidates.length,
     coverageStatus: shortlist.length ? "usable" : "empty",
-    warnings: shortlist.length ? [] : [`No candidate passed the screen: ${screenSummary(candidates)}.`],
+    warnings: shortlist.length
+      ? []
+      : [`No candidate passed the screen: ${screenSummary(candidates)}.`],
   });
   // One trial per screened candidate; the outcome is filled in below as each stage decides it.
   const screened = new Map(
@@ -587,7 +694,11 @@ export async function repairEntity(input: {
         entityId: c.entity.id,
         source: c.proposed ? ("llm_proposal" as const) : ("qloo_list" as const),
         evidenceIds: [
-          ...(fused ? lists.filter((l) => fused.get(c.entity.id)!.views[l.view] !== undefined).map((l) => l.evidenceId) : listIds),
+          ...(fused
+            ? lists
+                .filter((l) => fused.get(c.entity.id)!.views[l.view] !== undefined)
+                .map((l) => l.evidenceId)
+            : listIds),
           ...(c.proposed ? proposalIds : []),
           screenRecord.evidenceId,
         ],
@@ -605,10 +716,19 @@ export async function repairEntity(input: {
       } satisfies DraftTrial,
     ]),
   );
-  const finish = (proposals: RepairProposal[]): EntityRepair => ({ proposals, trials: [...trials, ...screened.values()] });
+  const finish = (proposals: RepairProposal[]): EntityRepair => ({
+    proposals,
+    trials: [...trials, ...screened.values()],
+  });
   if (!shortlist.length) return finish([]);
 
-  const VIEW_NAME: Record<CandidateView, string> = { combined: "audience with the plan", audience: "audience", local: "local list", coherence: "fit with the plan", proposals: "your suggestions" };
+  const VIEW_NAME: Record<CandidateView, string> = {
+    combined: "audience with the plan",
+    audience: "audience",
+    local: "local list",
+    coherence: "fit with the plan",
+    proposals: "your suggestions",
+  };
   const viewText = (id: string, rank: number) =>
     fused
       ? `${Object.entries(fused.get(id)!.views)
@@ -620,7 +740,9 @@ export async function repairEntity(input: {
       `id ${c.entity.id}: ${c.entity.displayName}${c.proposed ? " (your suggestion, scored by Qloo)" : ""} — ${viewText(c.entity.id, c.fitRank)}; ${c.localWhy}` +
       (c.sharedRole.length ? `; same role: ${c.sharedRole.slice(0, 4).join(", ")}` : "") +
       (place ? `; kind: ${tagNames(c.entity, "urn:tag:category:place:").join(", ")}` : "") +
-      (slot === "brand_collaboration" ? `; business: ${tagNames(c.entity, "urn:tag:genre:brand").join(", ")}` : "") +
+      (slot === "brand_collaboration"
+        ? `; business: ${tagNames(c.entity, "urn:tag:genre:brand").join(", ")}`
+        : "") +
       (c.entity.shortDescription ? `; ${c.entity.shortDescription}` : ""),
   );
   const { data } = await generateStructured(input.llm, {
@@ -646,7 +768,9 @@ export async function repairEntity(input: {
         `No candidate passed the screen: the model found none fit the role (${(data.none ?? "no reason given").replace(/\.$/, "")}).`,
       ],
     });
-    for (const c of shortlist) screened.get(c.entity.id)!.screenedOutReason = "The model judged none of the shortlist could do the job";
+    for (const c of shortlist)
+      screened.get(c.entity.id)!.screenedOutReason =
+        "The model judged none of the shortlist could do the job";
     return finish([]);
   }
   // Only ids from the shortlist count; an unknown id falls back to the top-ranked candidate.
@@ -667,24 +791,28 @@ export async function repairEntity(input: {
     if (at < 0) t.screenedOutReason = "Not among the model's picks";
     else if (at >= MAX_TRIALS) t.screenedOutReason = `Beyond the ${MAX_TRIALS} re-tests per round`;
   }
-  return finish(tried.map(({ c, reason, expectedEffect }) => ({
-    slot,
-    after: {
+  return finish(
+    tried.map(({ c, reason, expectedEffect }) => ({
       slot,
-      label: c.entity.displayName,
-      origin: "agent_repair",
-      locked: false,
-      resolution: "resolved",
-      entity: toRef(c.entity),
-      tags: [],
-      placeCategory: place ? ((c.proposed ? categoryOfVenue(c.entity) : null) ?? current.placeCategory) : null,
-    },
-    reason: c.proposed ? `${reason} (Suggested by the agent, then scored in Qloo.)` : reason,
-    expectedEffect,
-    // Only the views this candidate appeared in, its own scoring if it was a suggestion, and the screen.
-    evidenceIds: [...screened.get(c.entity.id)!.evidenceIds],
-    considered: shortlist.map((x) => x.entity.displayName),
-  })));
+      after: {
+        slot,
+        label: c.entity.displayName,
+        origin: "agent_repair",
+        locked: false,
+        resolution: "resolved",
+        entity: toRef(c.entity),
+        tags: [],
+        placeCategory: place
+          ? ((c.proposed ? categoryOfVenue(c.entity) : null) ?? current.placeCategory)
+          : null,
+      },
+      reason: c.proposed ? `${reason} (Suggested by the agent, then scored in Qloo.)` : reason,
+      expectedEffect,
+      // Only the views this candidate appeared in, its own scoring if it was a suggestion, and the screen.
+      evidenceIds: [...screened.get(c.entity.id)!.evidenceIds],
+      considered: shortlist.map((x) => x.entity.displayName),
+    })),
+  );
 }
 
 /** The first suitable category a venue is filed under, to test it among venues of its own kind. */
@@ -700,7 +828,11 @@ const directionSchema = z.object({
   tags: z.array(z.string()).describe("1-3 words copied exactly from the list"),
   direction: z.string().describe("the revised creative direction in a few words"),
   reason: z.string().describe("one or two sentences citing the ranks given"),
-  expectedEffect: z.string().describe("which test should improve in the re-test, in one line; no predictions of sales or engagement"),
+  expectedEffect: z
+    .string()
+    .describe(
+      "which test should improve in the re-test, in one line; no predictions of sales or engagement",
+    ),
 });
 
 export async function repairDirection(input: {
@@ -716,7 +848,12 @@ export async function repairDirection(input: {
   const current = plan.components.find((c) => c.slot === "creative_direction")!;
   const anchors = plan.anchors.map((a) => a.id);
   if (!anchors.length) return null;
-  const lists = await tagList(ctx, anchors, ctx.market.qlooLocation, `What this audience in ${ctx.market.label} leans to`);
+  const lists = await tagList(
+    ctx,
+    anchors,
+    ctx.market.qlooLocation,
+    `What this audience in ${ctx.market.label} leans to`,
+  );
   const options = lists.flatMap(({ tags }) => tags.slice(0, 15));
   if (!options.length) return null;
   const { data } = await generateStructured(input.llm, {
@@ -738,14 +875,22 @@ export async function repairDirection(input: {
   // audience already leans to; only the unsupported terms are replaced.
   // A tag is ruled out when all its words are in a ruled-out phrase, or the phrase's are in it:
   // "No industrial looks" rules out "Industrial"; "No luxury" rules out "Luxury".
-  const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const words = (s: string) =>
+    s
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(Boolean);
   const banned = ruledOut(input.brief).map(words);
   const allowedTag = (name: string) => {
     const w = words(name);
     return !banned.some((p) => w.every((x) => p.includes(x)) || p.every((x) => w.includes(x)));
   };
-  const kept = current.tags.filter((t) => byName.has(nameKey(t.name)) && allowedTag(t.name)).map((t) => byName.get(nameKey(t.name))!);
-  const picked = data.tags.flatMap((n) => byName.get(nameKey(n)) ?? []).filter((t) => allowedTag(t.name));
+  const kept = current.tags
+    .filter((t) => byName.has(nameKey(t.name)) && allowedTag(t.name))
+    .map((t) => byName.get(nameKey(t.name))!);
+  const picked = data.tags
+    .flatMap((n) => byName.get(nameKey(n)) ?? [])
+    .filter((t) => allowedTag(t.name));
   const tags = [...new Map([...kept, ...picked].map((t) => [t.id, t])).values()].slice(0, 3);
   if (!tags.length || tags.every((t) => kept.includes(t))) return null;
   return {

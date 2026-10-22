@@ -38,7 +38,8 @@ export const IntakeBriefSchema = z.object({
   audienceDescription: z.string().trim().max(400).default(""),
   audienceAnchors: z.array(z.string().trim().min(1).max(80)).max(4).default([]),
   /** Attributes, values, positioning or differentiators: enough to draft a plan. */
-  brandAttributes: z.array(z.string().trim().min(1).max(60)).max(8).default([]),
+  // Matches LaunchBriefSchema so a brief that passes intake can never fail when the run starts.
+  brandAttributes: z.array(z.string().trim().min(1).max(120)).max(8).default([]),
   budgetBand: z.string().trim().max(60).default(""),
   website: z.string().trim().max(200).default(""),
   choices: z.array(ChoiceSchema).max(4).default([]),

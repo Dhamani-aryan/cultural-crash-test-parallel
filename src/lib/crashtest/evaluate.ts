@@ -39,7 +39,9 @@ const fmt = (x: number | undefined) => (x === undefined ? "" : x.toFixed(3));
 
 function topDriver(h: ListHit, names: Map<string, string>): string {
   const ex = Object.entries(h.explainability ?? {}).sort((a, b) => b[1] - a[1])[0];
-  return ex && names.has(ex[0]) ? `; strongest link: ${names.get(ex[0])} (${ex[1].toFixed(2)})` : "";
+  return ex && names.has(ex[0])
+    ? `; strongest link: ${names.get(ex[0])} (${ex[1].toFixed(2)})`
+    : "";
 }
 
 function listDimension(
@@ -92,13 +94,24 @@ function localDimension(ev: ComponentEvidence, what: string, city: string): Dime
   const weight = WEIGHTS.local;
   if (ev.tagLocal) {
     const per = ev.tagLocal.map((t) => {
+      const contrast = t.sourceLocation ?? "New York";
       if (t.cityRank === undefined) return { s: 0.2, why: `"${t.tag}" isn't characteristic here` };
       if (t.sourceRank === undefined)
-        return { s: 1, why: `"${t.tag}" ranks #${t.cityRank} here and isn't in New York's top list` };
+        return {
+          s: 1,
+          why: `"${t.tag}" ranks #${t.cityRank} here and isn't in ${contrast}'s top list`,
+        };
       const d = t.sourceRank - t.cityRank;
-      if (d >= 5) return { s: 1, why: `"${t.tag}" ranks higher here (#${t.cityRank}) than in New York (#${t.sourceRank})` };
-      if (d > -5) return { s: 0.7, why: `"${t.tag}" ranks about the same here and in New York` };
-      return { s: 0.5, why: `"${t.tag}" ranks lower here (#${t.cityRank}) than in New York (#${t.sourceRank})` };
+      if (d >= 5)
+        return {
+          s: 1,
+          why: `"${t.tag}" ranks higher here (#${t.cityRank}) than in ${contrast} (#${t.sourceRank})`,
+        };
+      if (d > -5) return { s: 0.7, why: `"${t.tag}" ranks about the same here and in ${contrast}` };
+      return {
+        s: 0.5,
+        why: `"${t.tag}" ranks lower here (#${t.cityRank}) than in ${contrast} (#${t.sourceRank})`,
+      };
     });
     return {
       key: "local",
@@ -227,7 +240,15 @@ export function assessComponent(
     finding = fromHere
       ? `${audience.explanation} It is from here, and Qloo often leaves out very popular local names under a city signal, so this is thin evidence, not a contradiction.`
       : audience.explanation;
-    return { ...base, status, total: undefined, coverage, dimensions: dims, finding, contradicted: !fromHere };
+    return {
+      ...base,
+      status,
+      total: undefined,
+      coverage,
+      dimensions: dims,
+      finding,
+      contradicted: !fromHere,
+    };
   } else if (
     total !== undefined &&
     total >= SUPPORTED.total &&
@@ -253,14 +274,23 @@ export function assessComponent(
   // A generic global default (absent from the city's own list but big elsewhere or in the US)
   // is the contradiction; being from another country or thinly evidenced is not.
   const l = ev.local;
-  const globalDefault = Boolean(l && !l.place && !l.fromHere && !l.inCityList && (l.global || l.familiarInSource));
+  const globalDefault = Boolean(
+    l && !l.place && !l.fromHere && !l.inCityList && (l.global || l.familiarInSource),
+  );
   const contradicted =
     status === "constraint_conflict" ||
-    (status === "weak" && (c.slot === "creative_direction" ? (audience.score ?? 0) < 0.5 : globalDefault));
+    (status === "weak" &&
+      (c.slot === "creative_direction" ? (audience.score ?? 0) < 0.5 : globalDefault));
   return { ...base, status, total, coverage, dimensions: dims, finding, contradicted };
 }
 
-const STATUS_ORDER: ComponentStatus[] = ["constraint_conflict", "no_support", "unresolved", "weak", "supported"];
+const STATUS_ORDER: ComponentStatus[] = [
+  "constraint_conflict",
+  "no_support",
+  "unresolved",
+  "weak",
+  "supported",
+];
 
 export function evaluatePlan(input: EvaluateInput): PlanEvaluation {
   const names = new Map<string, string>();
@@ -308,17 +338,31 @@ export function evaluatePlan(input: EvaluateInput): PlanEvaluation {
  * upgrade of a choice nothing contradicts must also land on Supported and be materially better.
  * `accepted` is left false here: only the best passing candidate of a round is accepted.
  */
-export function judgeRetest(prev: PlanEvaluation, next: PlanEvaluation, slot: Slot, upgrade: boolean): RetestResult {
+export function judgeRetest(
+  prev: PlanEvaluation,
+  next: PlanEvaluation,
+  slot: Slot,
+  upgrade: boolean,
+): RetestResult {
   const before = prev.components.find((c) => c.slot === slot)!;
   const now = next.components.find((c) => c.slot === slot)!;
   const progress = compareEvaluations(prev, next, slot);
   const lostSupported = prev.components
-    .filter((c) => c.slot !== slot && c.status === "supported" && next.components.find((x) => x.slot === c.slot)?.status !== "supported")
+    .filter(
+      (c) =>
+        c.slot !== slot &&
+        c.status === "supported" &&
+        next.components.find((x) => x.slot === c.slot)?.status !== "supported",
+    )
     .map((c) => c.slot);
   let rejectionCode: RejectionCode | undefined;
-  if (now.status === "constraint_conflict" || next.hardConstraintViolations.length > prev.hardConstraintViolations.length)
+  if (
+    now.status === "constraint_conflict" ||
+    next.hardConstraintViolations.length > prev.hardConstraintViolations.length
+  )
     rejectionCode = "constraint_conflict";
-  else if (lostSupported.length && !(next.contradicted < prev.contradicted)) rejectionCode = "plan_regression";
+  else if (lostSupported.length && !(next.contradicted < prev.contradicted))
+    rejectionCode = "plan_regression";
   else if (!progress.better) rejectionCode = "no_improvement";
   else if (upgrade && now.status !== "supported") rejectionCode = "target_not_supported";
   else if (upgrade && !progress.material) rejectionCode = "no_improvement";
@@ -352,12 +396,17 @@ export interface Progress {
  * repaired choice's own status, then the plan score. Comparing scores alone would mislead when a choice moves from "no
  * support" (no score) to a scored status.
  */
-export function compareEvaluations(prev: PlanEvaluation, next: PlanEvaluation, slot: Slot): Progress {
+export function compareEvaluations(
+  prev: PlanEvaluation,
+  next: PlanEvaluation,
+  slot: Slot,
+): Progress {
   const k = prev.contradicted - next.contradicted;
   if (k !== 0) return { better: k > 0, worse: k < 0, material: k > 0 };
   const s = next.supported - prev.supported;
   if (s !== 0) return { better: s > 0, worse: s < 0, material: s > 0 };
-  const rank = (e: PlanEvaluation) => STATUS_ORDER.indexOf(e.components.find((c) => c.slot === slot)!.status);
+  const rank = (e: PlanEvaluation) =>
+    STATUS_ORDER.indexOf(e.components.find((c) => c.slot === slot)!.status);
   const r = rank(next) - rank(prev);
   if (r !== 0) return { better: r > 0, worse: r < 0, material: r > 0 };
   const d = (next.totalScore ?? 0) - (prev.totalScore ?? 0);

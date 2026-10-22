@@ -1,6 +1,7 @@
 import {
-  CONTROL_LOCATIONS,
-  SOURCE_LOCATIONS,
+  contrastLocation,
+  controlLocations,
+  sourceLocations,
   confidence,
   type Confidence,
   type Domain,
@@ -164,11 +165,9 @@ export async function findEquivalents(
 
   // 1. City lists per category: the target pool, the control cities (global check) and the
   //    US cities (familiarity check). One set per category, shared across anchors.
-  const controls = CONTROL_LOCATIONS.filter((c) => c !== market.qlooLocation).slice(
-    0,
-    CONTROL_COUNT,
-  );
-  const cities = [market.qlooLocation, ...controls, ...SOURCE_LOCATIONS];
+  const controls = controlLocations(market, CONTROL_COUNT);
+  const sources = sourceLocations(market);
+  const cities = [market.qlooLocation, ...controls, ...sources];
   const keyOf = (e: QlooEntity) => (domain === "place" ? chainKey(e.name) : e.id);
   const listSets = new Map<string, Promise<QlooEntity[][]>>();
   const listsFor = (category: string[]) => {
@@ -479,7 +478,7 @@ async function affinitySkew(
   };
   const [city, source] = await Promise.all([
     scores(market.qlooLocation),
-    scores(SOURCE_LOCATIONS[0]),
+    scores(contrastLocation(market)),
   ]);
   return new Map(
     ids.map((id) => [id, city.has(id) && (!source.has(id) || city.get(id)! > source.get(id)!)]),

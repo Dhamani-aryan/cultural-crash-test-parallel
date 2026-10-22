@@ -22,18 +22,27 @@ const world = () => ({ qloo: worldClient().client, llm: worldLlm().llm });
 
 describe("handleCrashTest", () => {
   it("rejects invalid briefs and unsupported cities", async () => {
-    expect((await handleCrashTest(post({ brief: { marketId: "london" } }), noDeps)).status).toBe(400);
-    const paris = await handleCrashTest(post({ brief: { ...LONDON_BRIEF, marketId: "paris" } }), noDeps);
-    expect(paris.status).toBe(400);
+    expect((await handleCrashTest(post({ brief: { marketId: "london" } }), noDeps)).status).toBe(
+      400,
+    );
+    const seoul = await handleCrashTest(
+      post({ brief: { ...LONDON_BRIEF, marketId: "seoul" } }),
+      noDeps,
+    );
+    expect(seoul.status).toBe(400);
   });
 
   it("streams a live run to its done event, then replays it labelled as recorded", async () => {
     const cache = createMemoryCache(10, new Map());
-    const live = await readEvents(await handleCrashTest(post({ brief: LONDON_BRIEF }), world, () => cache));
+    const live = await readEvents(
+      await handleCrashTest(post({ brief: LONDON_BRIEF }), world, () => cache),
+    );
     expect(live.at(-1)?.type).toBe("done");
     expect(live.some((e) => e.type === "evidence")).toBe(true);
 
-    const replayed = await readEvents(await handleCrashTest(post({ brief: LONDON_BRIEF }), noDeps, () => cache));
+    const replayed = await readEvents(
+      await handleCrashTest(post({ brief: LONDON_BRIEF }), noDeps, () => cache),
+    );
     expect(replayed[0]).toMatchObject({ type: "stage", stage: "replay" });
     expect((replayed[0] as Extract<RunEvent, { type: "stage" }>).message).toMatch(/recorded/);
     expect(replayed.length).toBe(live.length + 1);
@@ -50,7 +59,9 @@ describe("handleCrashTest", () => {
     const cache = createMemoryCache(10, new Map());
     const parsed = (await import("@/lib/crashtest/types")).LaunchBriefSchema.parse(LONDON_BRIEF);
     await cache.set(runKey(parsed), { recordedAt: "2026-10-01T00:00:00Z", events: [] }, 60);
-    const events = await readEvents(await handleCrashTest(post({ brief: LONDON_BRIEF, fresh: true }), world, () => cache));
+    const events = await readEvents(
+      await handleCrashTest(post({ brief: LONDON_BRIEF, fresh: true }), world, () => cache),
+    );
     expect(events[0]).not.toMatchObject({ stage: "replay" });
     expect(events.at(-1)?.type).toBe("done");
   });
@@ -60,14 +71,23 @@ describe("handleCrashTest", () => {
     const draft = intakeFromBrief(LONDON_BRIEF, "London streetwear launch", "t1");
     const unconfirmed = await handleCrashTest(post({ intake: draft }), noDeps);
     expect(unconfirmed.status).toBe(400);
-    const confirmed = refresh({ ...draft, brief: { ...draft.brief, brandAttributes: ["understated"] }, confirmed: true });
+    const confirmed = refresh({
+      ...draft,
+      brief: { ...draft.brief, brandAttributes: ["understated"] },
+      confirmed: true,
+    });
     const events = await readEvents(await handleCrashTest(post({ intake: confirmed }), world));
     expect(events.at(-1)?.type).toBe("done");
   });
 
   it("refuses a live run when the limiter says so, but never a replay", async () => {
     const refuse = async () => new Response("slow down", { status: 429 });
-    const res = await handleCrashTest(post({ brief: LONDON_BRIEF }), noDeps, () => createMemoryCache(10, new Map()), refuse);
+    const res = await handleCrashTest(
+      post({ brief: LONDON_BRIEF }),
+      noDeps,
+      () => createMemoryCache(10, new Map()),
+      refuse,
+    );
     expect(res.status).toBe(429);
   });
 
