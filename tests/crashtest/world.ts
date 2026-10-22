@@ -125,16 +125,60 @@ export function worldClient(opts: WorldOptions = {}) {
 }
 
 /** A fake model that answers each step of a crash test by recognising its system prompt. */
+/**
+ * A fake blind judge that decides only from the claims it is shown: each plan scores +1 per
+ * supporting claim and -1 per contradicting one; the best plan wins, equal plans tie. It never
+ * looks at position, so a fair adjudicator should reach the same verdict in both orders.
+ */
+export function evidenceJudge(prompt: string) {
+  const score = new Map<string, number>();
+  const claims = new Map<string, string[]>();
+  for (const line of prompt.split("\n")) {
+    const plan = line.match(/^Plan (\S+)/);
+    if (plan) score.set(plan[1], 0);
+    const claim = line.match(/^\s+((\S+)\.\d+) · [^·]+ · (supports|contradicts|unknown)/);
+    if (claim) {
+      const [, id, blind, stance] = claim;
+      score.set(blind, (score.get(blind) ?? 0) + (stance === "supports" ? 1 : stance === "contradicts" ? -1 : 0));
+      if (stance === "supports") claims.set(blind, [...(claims.get(blind) ?? []), id]);
+    }
+  }
+  const ranked = [...score].sort((a, b) => b[1] - a[1]);
+  if (ranked.length < 2 || ranked[0][1] === ranked[1][1])
+    return { verdict: "tie", winner: null, decisive: [], counter: [], dimensionWinners: [], rationale: "The claims don't separate the plans." };
+  const winner = ranked[0][0];
+  return { verdict: "winner", winner, decisive: (claims.get(winner) ?? []).slice(0, 3), counter: [], dimensionWinners: [], rationale: `Plan ${winner} has more supporting claims.` };
+}
+
 export function worldLlm(
-  over: { draft?: Record<string, unknown>; pick?: string | string[]; reason?: string; propose?: string[] } = {},
+  over: {
+    draft?: Record<string, unknown>;
+    pick?: string | string[];
+    reason?: string;
+    propose?: string[];
+    /** The blind judge's answer for a prompt (default: the evidence-only fake judge). */
+    judge?: (prompt: string, call: number) => unknown;
+    /** Anchor hypotheses when the brief names none. */
+    anchors?: { name: string; country: string }[];
+  } = {},
 ) {
   const prompts: string[] = [];
+  /** Every call with its system prompt, to check what each step was shown. */
+  const calls: { system: string; prompt: string }[] = [];
+  let judgeCalls = 0;
   const llm: LlmClient = {
     provider: "fake",
     model: "fake",
     async generateText({ system, prompt }) {
       prompts.push(prompt);
+      calls.push({ system, prompt });
       const reply = (x: unknown) => ({ text: typeof x === "string" ? x : JSON.stringify(x), usage: null, model: "fake", ms: 1 });
+      if (system.startsWith("You compare anonymous launch plans"))
+        return reply(over.judge ? over.judge(prompt, judgeCalls++) : evidenceJudge(prompt));
+      if (system.startsWith("Suggest broader, established audience anchors"))
+        return reply({ anchors: [{ name: "Northcap", country: "United Kingdom" }, { name: "Deckhouse", country: "United Kingdom" }] });
+      if (system.startsWith("Suggest audience anchors for measurement only"))
+        return reply({ anchors: over.anchors ?? [{ name: "Northcap", country: "United Kingdom" }, { name: "Deckhouse", country: "United Kingdom" }] });
       if (system.startsWith("You are a brand strategist"))
         return reply({
           anchors: ["Northcap", "Deckhouse"],
@@ -170,13 +214,13 @@ export function worldLlm(
           choices: ids.map((id) => ({ id, reason: over.reason ?? "Ranks first for this audience in London and is from here.", expectedEffect: "Audience affinity found." })),
         });
       }
-      if (system.startsWith("Revise a launch's creative direction"))
+      if (system.startsWith("Revise a launch's creative direction") || system.startsWith("Write a launch's creative direction"))
         return reply({ tags: ["Industrial"], direction: "Industrial", reason: "Top here.", expectedEffect: "Supported." });
       if (system.startsWith("Write a 2-3 sentence")) return reply("Verdict from the recorded facts.");
       throw new Error(`no scripted reply for: ${system.slice(0, 50)}`);
     },
   };
-  return { llm, prompts };
+  return { llm, prompts, calls };
 }
 
 export const LONDON_BRIEF = {

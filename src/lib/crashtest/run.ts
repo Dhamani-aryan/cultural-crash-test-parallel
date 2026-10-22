@@ -10,7 +10,8 @@ import { buildPlan, draftPlan } from "./plan";
 import { QueryRequestSchema, parseQuery, type QueryRequest } from "./query";
 import { applyRepair, repairDirection, repairEntity, type DraftTrial, type RepairProposal } from "./repair";
 import { writeVerdict } from "./report";
-import { rankingFrom, type Ranking } from "./version";
+import { runParallelCrashTest } from "./parallel-run";
+import { architectureFrom, rankingFrom, type Architecture, type Ranking } from "./version";
 import {
   DEPTHS,
   LaunchBriefSchema,
@@ -56,6 +57,10 @@ export interface RunOptions {
    * LLM draft and its resolution are skipped, so two agent versions start from identical plans.
    */
   start?: { plan: CulturalPlan; assumptions: string[] };
+  /** Sequential (the control) or parallel three-track; defaults to RECOMMENDATION_ARCHITECTURE, then sequential. */
+  architecture?: Architecture;
+  /** Parallel runs: the n-th blind ID (tests make them deterministic; live runs use random ones). */
+  blindId?: (n: number) => string;
 }
 
 /** Stop after this many rounds in a row without a material improvement. */
@@ -68,6 +73,7 @@ export async function runCrashTest(
   input: LaunchBriefInput | QueryRequest,
   opts: RunOptions = {},
 ): Promise<RunState> {
+  if (architectureFrom(opts.architecture) === "parallel") return runParallelCrashTest(deps, input, opts);
   const emit = opts.emit ?? (() => {});
   const market = marketById(input.marketId);
   if (!market) throw new Error(`Unsupported city: ${input.marketId}`);
@@ -117,6 +123,7 @@ export async function runCrashTest(
     provenance: { mode: "live", runVersion: opts.runVersion ?? "dev" },
     unresolvedQuestions: [],
     rejected: {},
+    architecture: "sequential",
     startedAt: new Date().toISOString(),
   };
 

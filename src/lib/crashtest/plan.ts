@@ -286,15 +286,21 @@ export async function mapDirection(
   return { tags: [...new Map(tags.map((t) => [t.id, t])).values()], note: data.note };
 }
 
-/** Resolve the draft into a plan of Qloo entities and tags. */
-export async function buildPlan(input: {
+/**
+ * Resolve audience anchor names to Qloo entities, leaving out names Qloo doesn't know and
+ * namesakes from the wrong country. When the brief named no anchors and none of the
+ * model-suggested ones resolve, one bounded retry with broader anchors is made; anchors the user
+ * named are never substituted.
+ */
+export async function resolveAnchors(input: {
   llm: LlmClient;
   ctx: GatherContext;
   brief: LaunchBrief;
-  draft: Draft;
-  origin: Component["origin"];
-}): Promise<{ plan: CulturalPlan; notes: string[] }> {
-  const { llm, ctx, brief, draft } = input;
+  names: string[];
+  countries?: string[];
+}): Promise<{ anchors: EntityRef[]; notes: string[]; broadened: boolean }> {
+  const { llm, ctx, brief } = input;
+  const draft = { anchors: input.names, countries: input.countries ? { anchors: input.countries } : undefined };
   const notes: string[] = [];
   const anchorHits = await mapLimit(draft.anchors, 2, async (name) => {
     const i = draft.anchors.indexOf(name);
@@ -329,7 +335,9 @@ export async function buildPlan(input: {
   // When the user supplied only a natural-language audience and every model-proposed anchor is
   // absent from Qloo, make one bounded attempt with broader anchors. Never substitute anchors the
   // user explicitly named, and never continue if the fallback also has no measurable entities.
+  let broadened = false;
   if (!anchors.length && !brief.audienceAnchors.length) {
+    broadened = true;
     const { data } = await generateStructured(llm, {
       schema: fallbackAnchorsSchema,
       system:
@@ -362,6 +370,28 @@ export async function buildPlan(input: {
       notes.push(
         `Broader audience anchors were used because Qloo didn't know ${draft.anchors.join(", ")}.`,
       );
+  }
+  return { anchors, notes, broadened };
+}
+
+/** Resolve the draft into a plan of Qloo entities and tags. */
+export async function buildPlan(input: {
+  llm: LlmClient;
+  ctx: GatherContext;
+  brief: LaunchBrief;
+  draft: Draft;
+  origin: Component["origin"];
+  /** Already-resolved audience anchors to measure against; the draft's own anchors are then not looked up. */
+  anchors?: EntityRef[];
+}): Promise<{ plan: CulturalPlan; notes: string[] }> {
+  const { llm, ctx, brief, draft } = input;
+  const notes: string[] = [];
+  let anchors: EntityRef[];
+  if (input.anchors) anchors = input.anchors;
+  else {
+    const r = await resolveAnchors({ llm, ctx, brief, names: draft.anchors, countries: draft.countries?.anchors });
+    anchors = r.anchors;
+    notes.push(...r.notes);
   }
 
   const locked = (slot: Slot) =>

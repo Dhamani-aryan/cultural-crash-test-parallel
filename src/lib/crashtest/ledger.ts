@@ -136,6 +136,11 @@ export interface Ledger {
   add(r: Omit<EvidenceRecord, "evidenceId" | "collectedAt" | "iteration">): EvidenceRecord;
 }
 
+/** The same ledger, with every record it adds stamped with the track or stage that collected it. */
+export function scopedLedger(ledger: Ledger, scope: string): Ledger {
+  return { records: ledger.records, add: (r) => ledger.add({ ...r, scope }) };
+}
+
 export function createLedger(
   iteration: () => number,
   onRecord: (r: EvidenceRecord) => void = () => {},

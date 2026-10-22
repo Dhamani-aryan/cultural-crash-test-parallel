@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Architecture } from "./version";
 
 /**
  * Domain types for a crash-test run. The whole decision history lives in one `RunState`:
@@ -124,7 +125,9 @@ export interface EvidenceRecord {
   evidenceId: string;
   iteration: number;
   purpose: string;
-  queryKind: "search" | "entities" | "tags" | "insights" | "locality";
+  queryKind: "search" | "entities" | "tags" | "insights" | "locality" | "adjudication";
+  /** Parallel runs: which track or stage collected it ("shared", "user", "llm", "agent", …). */
+  scope?: string;
   /** Parameters as sent, minus anything secret. Enough to reproduce the query. */
   sanitizedRequest: Record<string, unknown>;
   qlooEntityIds: string[];
@@ -362,6 +365,10 @@ export interface RunState {
   stopDetail?: string;
   /** The model's short verdict, written only from the recorded state. */
   verdict?: string;
+  /** Absent in runs recorded before the parallel architecture existed: those are sequential. */
+  architecture?: Architecture;
+  /** Parallel runs only: the three tracks, the evidence matrix, adjudication and the final verdict. */
+  parallel?: ParallelResult;
   startedAt: string;
   finishedAt?: string;
 }
@@ -376,3 +383,251 @@ export type RunEvent =
   | { type: "budget"; qlooCallsUsed: number; maxQlooCalls: number }
   | { type: "done"; state: RunState }
   | { type: "error"; message: string };
+
+// ---------- parallel three-track architecture ----------
+
+/** Who produced a candidate plan. Display position is never identity: see `candidateId`. */
+export type PlanTrack = "user" | "llm" | "agent" | "hybrid";
+export const TRACK_LABEL: Record<PlanTrack, string> = {
+  user: "You",
+  llm: "LLM",
+  agent: "Evidence-first agent",
+  hybrid: "Hybrid",
+};
+
+/** Where one component of a candidate came from; "search" is the improvement loop's targeted search. */
+export type ComponentSource = "user" | "llm" | "agent" | "search";
+export const SOURCE_LABEL: Record<ComponentSource, string> = {
+  user: "From you",
+  llm: "From the LLM",
+  agent: "From the evidence-first agent",
+  search: "From a later targeted search",
+};
+
+/** A slot a candidate leaves open: the user didn't specify it, or the agent found nothing that passed its screens. */
+export interface OpenSlot {
+  slot: Slot;
+  state: "not_specified" | "abstained";
+  reason: string;
+}
+
+export interface CandidatePlan {
+  /** Stable identity, e.g. "user", "llm", "agent", "agent-alt-1", "hybrid-2". */
+  candidateId: string;
+  track: PlanTrack;
+  /** What the blind adjudicator sees instead of the track. Random per run, stable within it. */
+  blindId: string;
+  briefFingerprint: string;
+  /** Only the components this candidate actually has; open slots are listed in `open`. */
+  plan: CulturalPlan;
+  open: OpenSlot[];
+  sources: Partial<Record<Slot, ComponentSource>>;
+  evaluation: PlanEvaluation | null;
+  assumptions: string[];
+  /** Hybrids and alternatives: the candidate they were built from. */
+  parent?: string;
+  provenance: { model?: string; qlooCalls: number; llmCalls: number; ms: number; generatedAt: string };
+}
+
+export const EVIDENCE_DIMENSIONS = [
+  "constraint",
+  "entity",
+  "audience",
+  "local",
+  "coherence",
+  "role_fit",
+  "feasibility",
+  "distinctiveness",
+  "diversity",
+  "coverage",
+] as const;
+export type EvidenceDimension = (typeof EVIDENCE_DIMENSIONS)[number];
+export const EVIDENCE_DIMENSION_LABEL: Record<EvidenceDimension, string> = {
+  constraint: "Constraint compliance",
+  entity: "Entity correctness",
+  audience: "Audience fit",
+  local: "Local relevance",
+  coherence: "Cross-slot coherence",
+  role_fit: "Brief and role fit",
+  feasibility: "Feasibility",
+  distinctiveness: "Distinctiveness",
+  diversity: "Diversity",
+  coverage: "Evidence coverage",
+};
+
+export type EvidenceSource =
+  | "user"
+  | "constraint"
+  | "qloo_affinity"
+  | "qloo_locality"
+  | "qloo_coherence"
+  | "qloo_explainability"
+  | "entity_metadata"
+  | "logical_rubric"
+  | "official_source"
+  | "human"
+  | "counterfactual";
+
+/** A claim supports, contradicts, or can't say. Unknown is never turned into either. */
+export type ClaimStance = "supports" | "contradicts" | "unknown";
+
+/** Layer 6: what a person should make of one component. */
+export type ComponentState = "supported" | "plausible_thin" | "conflicting" | "unverified" | "needs_human" | "rejected";
+export const COMPONENT_STATE_LABEL: Record<ComponentState, string> = {
+  supported: "Supported",
+  plausible_thin: "Plausible but thin",
+  conflicting: "Conflicting evidence",
+  unverified: "Unverified",
+  needs_human: "Needs human confirmation",
+  rejected: "Rejected",
+};
+
+export interface EvidenceClaim {
+  claimId: string;
+  candidateId: string;
+  slot?: Slot;
+  dimension: EvidenceDimension;
+  claim: string;
+  stance: ClaimStance;
+  source: EvidenceSource;
+  /** Ledger records behind the claim; may be empty only when `ruleId` names the rule that made it. */
+  evidenceIds: string[];
+  /** The declared rule that produced the claim (logical and constraint claims always have one). */
+  ruleId?: string;
+  strength: "strong" | "moderate" | "thin" | "unknown";
+  limitations: string[];
+}
+
+export interface EvidenceMatrix {
+  rubricVersion: string;
+  candidateIds: string[];
+  claims: EvidenceClaim[];
+  /** Share of the measurable checks (audience, local, coherence per component) that returned evidence. */
+  coverageByCandidate: Record<string, number>;
+  /** Components present, out of all slots. Kept apart from coverage: an unspecified slot isn't a failure. */
+  completenessByCandidate: Record<string, number>;
+  /** Deterministic vetoes. A candidate with any can't win. */
+  hardFailures: Record<string, string[]>;
+  componentStates: Record<string, Partial<Record<Slot, ComponentState>>>;
+}
+
+/** One order-specific blind judgment, resolved from blind IDs to candidate IDs in code. */
+export interface BlindJudgment {
+  /** Blind IDs in the order they were shown. */
+  order: string[];
+  verdict: "winner" | "tie" | "insufficient_evidence";
+  winnerCandidateId: string | null;
+  decisiveClaimIds: string[];
+  counterevidenceClaimIds: string[];
+  dimensionWinners: Partial<Record<EvidenceDimension, string[]>>;
+  rationale: string;
+  /** The ledger record of this judgment. */
+  evidenceId: string;
+  /** False when the judge's answer couldn't be used (unknown ID, missing claims); it then counts as no verdict. */
+  valid: boolean;
+  problem?: string;
+}
+
+export interface AdjudicationResult {
+  stage: "initial" | "final";
+  candidateIds: string[];
+  /** Candidates removed by deterministic hard gates before the judge saw anything. */
+  eliminated: Record<string, string[]>;
+  /** Candidates with exactly the same choices as another, judged once as that one (duplicate → kept ID). */
+  merged: Record<string, string>;
+  winnerCandidateId: string | null;
+  verdict: "winner" | "tie" | "unstable" | "insufficient_evidence";
+  dimensionWinners: Partial<Record<EvidenceDimension, string[]>>;
+  rationale: string;
+  decisiveClaimIds: string[];
+  counterevidenceClaimIds: string[];
+  orderResults: BlindJudgment[];
+  /** Wording removed because it claimed sales, attendance or other outcomes the evidence can't show. */
+  flagged: string[];
+  /** The deterministic evidence ordering, best first, shown beside the judge's verdict. */
+  evidenceOrder: string[];
+}
+
+export type ChallengeKind = "constraint" | "weak_evidence" | "incoherent" | "better_alternative" | "unsupported_claim";
+
+export interface ChallengeFinding {
+  kind: ChallengeKind;
+  candidateId: string;
+  slot?: Slot;
+  detail: string;
+  claimIds: string[];
+  /** better_alternative: the candidate whose component tested better. */
+  alternativeFrom?: string;
+}
+
+export interface HybridAttempt {
+  candidateId: string;
+  parent: string;
+  kind: "union" | "swap" | "search";
+  slot?: Slot;
+  accepted: boolean;
+  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked";
+  reason: string;
+  retest?: {
+    supportedBefore: number;
+    supportedAfter: number;
+    contradictedBefore: number;
+    contradictedAfter: number;
+    lostSupported: Slot[];
+    violationsBefore: number;
+    violationsAfter: number;
+  };
+}
+
+export interface ImprovementRound {
+  round: number;
+  incumbent: string;
+  challenges: ChallengeFinding[];
+  attempts: HybridAttempt[];
+  accepted?: string;
+}
+
+export interface FinalVerdict {
+  candidateId: string | null;
+  track: PlanTrack | null;
+  verdict: AdjudicationResult["verdict"];
+  /** Both final orders agreed and no hard gate overrode the judge. */
+  stable: boolean;
+  /** "adjudication": the blind judge decided. "evidence_order": no stable verdict, so the deterministic order is shown and flagged for a person. */
+  decidedBy: "adjudication" | "evidence_order" | "none";
+  plan: CulturalPlan | null;
+  open: OpenSlot[];
+  evaluation: PlanEvaluation | null;
+  sources: Partial<Record<Slot, ComponentSource>>;
+  bestSupportedComponents: { slot: Slot; label: string; candidateId: string; status: ComponentStatus }[];
+  userChoicesPreserved: { slot: Slot; label: string; locked: boolean; preserved: boolean }[];
+  assumptionsIntroduced: string[];
+  evidenceLimitations: string[];
+  rejectedAlternatives: { candidateId: string; reason: string }[];
+  humanChecks: string[];
+}
+
+export interface TrackUsage {
+  ms: number;
+  qlooChecks: number;
+  llmCalls: number;
+}
+export type UsageScope = "shared" | "user" | "llm" | "agent" | "adjudication" | "improvement";
+
+export interface ParallelResult {
+  architectureVersion: string;
+  baseRubricVersion: string;
+  evidenceRubricVersion: string;
+  adjudicationVersion: string;
+  briefFingerprint: string;
+  /** Who chose the audience anchors every track is measured against. */
+  anchorSource: "user" | "model_hypothesis" | "none";
+  anchorNotes: string[];
+  candidates: CandidatePlan[];
+  matrix: EvidenceMatrix;
+  initial: AdjudicationResult;
+  rounds: ImprovementRound[];
+  final: AdjudicationResult;
+  verdict: FinalVerdict;
+  usage: Record<UsageScope, TrackUsage>;
+}

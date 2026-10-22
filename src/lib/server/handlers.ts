@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { cacheKey, type Cache } from "@/lib/cache/cache";
 import { runCrashTest } from "@/lib/crashtest/run";
-import { RUN_VERSION, rankingFrom } from "@/lib/crashtest/version";
+import {
+  ADJUDICATION_VERSION,
+  EVIDENCE_RUBRIC_VERSION,
+  RUN_VERSION,
+  architectureFrom,
+  rankingFrom,
+  runVersionFor,
+} from "@/lib/crashtest/version";
 import { applyIntake } from "@/lib/intake/state";
 import { IntakeRequestSchema, IntakeStateSchema } from "@/lib/intake/types";
 import { MISSING_LABEL, refresh, toLaunchBrief } from "@/lib/intake/validate";
@@ -37,8 +44,11 @@ export { RUN_VERSION };
 const RECORDING_TTL = 14 * 24 * 60 * 60;
 
 export function runKey(brief: unknown): string {
-  // A recording belongs to one agent version and one candidate ranking.
-  return cacheKey(`${RUN_VERSION}:${rankingFrom()}`, brief);
+  // A recording belongs to one agent version, one candidate ranking and one architecture; a
+  // parallel recording also to its evidence-rubric and adjudication versions.
+  const arch = architectureFrom();
+  const version = arch === "parallel" ? `${runVersionFor(arch)}:${EVIDENCE_RUBRIC_VERSION}:${ADJUDICATION_VERSION}` : RUN_VERSION;
+  return cacheKey(`${version}:${rankingFrom()}`, brief);
 }
 
 /** Turn a callback-style run into an async stream of events. */
@@ -107,7 +117,7 @@ async function* replay(rec: Recording, pauseMs = 60) {
     else if (e.type !== "done") await new Promise((r) => setTimeout(r, pauseMs / 4));
     // The finished state says it was replayed, so a saved copy stays labelled as recorded.
     yield e.type === "done"
-      ? ({ ...e, state: { ...e.state, provenance: { mode: "recorded", recordedAt: rec.recordedAt, runVersion: RUN_VERSION } } } satisfies RunEvent)
+      ? ({ ...e, state: { ...e.state, provenance: { mode: "recorded", recordedAt: rec.recordedAt, runVersion: e.state.provenance?.runVersion ?? RUN_VERSION } } } satisfies RunEvent)
       : e;
   }
 }
@@ -157,7 +167,7 @@ export async function handleCrashTest(
     return errorResponse(err);
   }
   const live = eventStream<RunEvent>(
-    (emit) => runCrashTest(resolved, input, { emit, signal: req.signal, runVersion: RUN_VERSION }),
+    (emit) => runCrashTest(resolved, input, { emit, signal: req.signal, runVersion: runVersionFor(architectureFrom()) }),
     (message) => ({ type: "error", message }),
   );
   return sseResponse(store ? record(live, store, key) : live, req.signal);

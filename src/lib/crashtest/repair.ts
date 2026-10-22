@@ -176,6 +176,17 @@ export function isFoodAndDrink(productCategory: string): boolean {
   return FOOD_AND_DRINK.test(productCategory);
 }
 
+/**
+ * What Qloo's categories say about a venue's format: filed as a kind that can't host a launch
+ * (a hotel, a clinic), as one that can, or neither. Qloo's categories are incomplete, so
+ * "neither" is unknown, not unsuitable.
+ */
+export function venueFormat(tagIds: string[], foodAndDrink: boolean): "can_host" | "unsuitable" | "unknown" {
+  if (tagIds.some((t) => UNSUITABLE_VENUE.test(t))) return "unsuitable";
+  const cats = tagIds.filter((t) => t.startsWith("urn:tag:category:place:"));
+  return cats.some((c) => EVENT_FORMATS.has(c) || (foodAndDrink && FOOD_VENUES.includes(c))) ? "can_host" : "unknown";
+}
+
 export function roleFits(
   slot: Slot,
   candidate: { tags: { id: string; type: string | null }[] },
@@ -260,6 +271,10 @@ export function ruledOut(brief: Pick<LaunchBrief, "constraints">): string[] {
  * the role with, so a collaboration brand must also show, in its Qloo description or tags, at
  * least one of the brief's product or attribute terms. Otherwise the unknown choice is kept.
  */
+/** The brief's testable product and attribute terms (generic words like "streetwear" removed). */
+export const briefTerms = (brief: Pick<LaunchBrief, "productCategory" | "brandAttributes">) =>
+  terms([brief.productCategory, ...brief.brandAttributes].join(" "));
+
 export function fitsBrief(
   e: Pick<QlooEntity, "shortDescription" | "description" | "tags">,
   brief: Pick<LaunchBrief, "constraints" | "productCategory" | "brandAttributes">,
@@ -269,7 +284,7 @@ export function fitsBrief(
   const banned = ruledOut(brief).find((p) => text.includes(p));
   if (banned) return { ok: false, why: `matches "${banned}", which the brief rules out` };
   if (!opts.requireAttributes) return { ok: true };
-  const want = terms([brief.productCategory, ...brief.brandAttributes].join(" "));
+  const want = briefTerms(brief);
   const have = terms(text);
   return [...want].some((t) => have.has(t))
     ? { ok: true }
@@ -358,6 +373,12 @@ export async function repairEntity(input: {
    * upgrade must be a sensible local pick, not merely a higher-scoring import.
    */
   upgrade?: boolean;
+  /**
+   * Fill an open slot of the evidence-first plan: there is no current choice to replace, and the
+   * model may not suggest names. Candidates come only from Qloo's lists; the model only chooses
+   * among the screened ones.
+   */
+  initial?: boolean;
 }): Promise<EntityRepair> {
   const { ctx, plan, slot, brief } = input;
   const current = plan.components.find((c) => c.slot === slot)!;
@@ -485,7 +506,8 @@ export async function repairEntity(input: {
   const listIds = lists.map((l) => l.evidenceId);
 
   // Source 2: the agent's own suggestions, found and scored in Qloo under the same signal.
-  const names = await proposeNames({
+  // An initial evidence-first pick takes names from Qloo only.
+  const names = input.initial ? [] : await proposeNames({
     llm: input.llm,
     ctx,
     brief,
@@ -631,8 +653,11 @@ export async function repairEntity(input: {
       // city's own country (venues: in it), whoever suggested it.
       const upgradeOk = !input.upgrade || isLocalOrigin(e, domain, ctx.market);
       // With no resolved original to compare against, a partner brand must fit the brief on evidence.
+      // An open slot of the evidence-first plan asks this only when the brief has terms to test:
+      // a brief that says only "streetwear" can't be matched, and requiring it would rule out every brand.
       const briefFit = fitsBrief(e, brief, {
-        requireAttributes: slot === "brand_collaboration" && current.resolution !== "resolved",
+        requireAttributes:
+          slot === "brand_collaboration" && current.resolution !== "resolved" && (!input.initial || briefTerms(brief).size > 0),
       });
       const fits = roleOk && upgradeOk && briefFit.ok;
       if (!roleOk)
@@ -750,7 +775,9 @@ export async function repairEntity(input: {
     system: PICK_SYSTEM,
     prompt: [
       briefText(brief, ctx.market),
-      `Weak choice — ${SLOT_LABEL[slot]}: ${current.label}. Finding: ${input.assessment.finding}`,
+      input.initial
+        ? `Open choice — ${SLOT_LABEL[slot]}: choose for this launch from the candidates below.`
+        : `Weak choice — ${SLOT_LABEL[slot]}: ${current.label}. Finding: ${input.assessment.finding}`,
       `Candidates (all checked in Qloo):\n${lines.join("\n")}`,
     ].join("\n\n"),
     label: `repair:${slot}`,
@@ -803,7 +830,7 @@ export async function repairEntity(input: {
         entity: toRef(c.entity),
         tags: [],
         placeCategory: place
-          ? ((c.proposed ? categoryOfVenue(c.entity) : null) ?? current.placeCategory)
+          ? ((c.proposed || input.initial ? categoryOfVenue(c.entity) : null) ?? current.placeCategory)
           : null,
       },
       reason: c.proposed ? `${reason} (Suggested by the agent, then scored in Qloo.)` : reason,
@@ -843,6 +870,8 @@ export async function repairDirection(input: {
   assessment: ComponentAssessment;
   /** Keep the direction's intent; replace only the words this audience here doesn't lean to. */
   upgrade?: boolean;
+  /** Write the evidence-first plan's direction: there is no current direction to revise. */
+  initial?: boolean;
 }): Promise<RepairProposal | null> {
   const { ctx, plan } = input;
   const current = plan.components.find((c) => c.slot === "creative_direction")!;
@@ -859,13 +888,17 @@ export async function repairDirection(input: {
   const { data } = await generateStructured(input.llm, {
     schema: directionSchema,
     system:
-      "Revise a launch's creative direction so it matches what the audience in this city leans to, while keeping the brand's attributes. Choose 1-3 words from the list only, copied exactly, ordered by fit." +
+      (input.initial
+        ? "Write a launch's creative direction from what the audience in this city leans to, keeping the brand's attributes. Choose 1-3 words from the list only, copied exactly, ordered by fit."
+        : "Revise a launch's creative direction so it matches what the audience in this city leans to, while keeping the brand's attributes. Choose 1-3 words from the list only, copied exactly, ordered by fit.") +
       (input.upgrade
         ? " Keep the current direction's intent: keep any current word that is on the list, and replace only the ones that aren't."
         : ""),
     prompt: [
       briefText(input.brief, ctx.market),
-      `Current direction: "${current.label}" (${current.tags.map((t) => t.name).join(", ")}). Finding: ${input.assessment.finding}`,
+      input.initial
+        ? "No direction has been chosen yet."
+        : `Current direction: "${current.label}" (${current.tags.map((t) => t.name).join(", ")}). Finding: ${input.assessment.finding}`,
       `This audience's top aesthetics and tones in ${ctx.market.label}, strongest first:\n${options.map((t) => t.name).join(", ")}`,
     ].join("\n\n"),
     label: "repair:direction",
