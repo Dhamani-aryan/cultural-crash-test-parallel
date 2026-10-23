@@ -602,7 +602,7 @@ export interface PoolRecord {
   /** Rank in each Qloo view it appeared in. */
   views: Partial<Record<CandidateView, number>>;
   lanes: ("affinity" | "locality" | "brief_fit")[];
-  screens: { role: string; locality: string; brief: string; distinct: string; central: string; notes: string[] };
+  screens: { role: string; locality: string; /** Fit to a neighbourhood the brief names, when it names one. */ hood?: "near" | "outside" | "far" | "unknown"; brief: string; distinct: string; central: string; notes: string[] };
   /** "pool" (composed into bundles), "reserve" (kept for the challenge loop) or why it was dropped. */
   outcome: string;
   evidenceIds: string[];

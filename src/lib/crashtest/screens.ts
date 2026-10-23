@@ -9,9 +9,10 @@ import { venueFormat } from "./repair";
  * deterministic, reads only the brief-intent contract and Qloo's own records, and returns
  * "unknown" when the evidence isn't there. Soft screens shape ranking and explanations; the
  * hard rules of the brief are elsewhere and stay vetoes. v2: neighbourhood fit reads Qloo's own
- * neighbourhood label and the coordinates Qloo returns (v1 never received coordinates).
+ * neighbourhood label and the coordinates Qloo returns (v1 never received coordinates). v3: 2–6 km
+ * from a named neighbourhood is outside it, not unknown.
  */
-export const SCREENS_VERSION = "screens:v2";
+export const SCREENS_VERSION = "screens:v3";
 
 const cat = (c: string) => `urn:tag:category:place:${c}`;
 
@@ -59,20 +60,20 @@ export function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lo
 
 /**
  * Is a venue in the neighbourhood the brief names? Qloo filing it under that neighbourhood, or
- * lying within 2 km of the neighbourhood's venues, is near; beyond 6 km is far; otherwise, or
- * without coordinates, unknown. A different neighbourhood label alone never makes it far.
+ * lying within 2 km of the neighbourhood's point, is near; 2–6 km is outside it; beyond 6 km is
+ * far. Without coordinates it is unknown: a different neighbourhood label alone never counts against it.
  */
 export function neighborhoodFit(
   e: Pick<QlooEntity, "geocode"> | undefined,
   c: Centroid | null,
   hood?: string,
-): { km: number | null; fit: "near" | "far" | "unknown"; named: boolean } {
+): { km: number | null; fit: "near" | "outside" | "far" | "unknown"; named: boolean } {
   const label = e?.geocode?.neighborhood;
   const named = !!hood && !!label && nameKey(label) === nameKey(hood);
   const km = c && e?.geocode?.latitude != null && e.geocode.longitude != null ? distanceKm({ lat: e.geocode.latitude, lon: e.geocode.longitude }, c) : null;
   if (named) return { km, fit: "near", named };
   if (km === null) return { km, fit: "unknown", named };
-  return { km, fit: km <= 2 ? "near" : km > 6 ? "far" : "unknown", named };
+  return { km, fit: km <= 2 ? "near" : km > 6 ? "far" : "outside", named };
 }
 
 /** Top-0.5% popularity: a mainstream default. It counts against a choice only when the brief asks for distinctiveness. */

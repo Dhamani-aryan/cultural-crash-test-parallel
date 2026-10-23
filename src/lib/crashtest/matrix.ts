@@ -57,7 +57,7 @@ export const RULES = {
   "R-anchor-hypothesis": "Model-suggested audience anchors are hypotheses a person should confirm.",
   "R-user-considered": "A choice the user was only considering is a weaker statement of preference than a named choice.",
   "R-host-tier": "A venue should be a kind of place the brief's event format calls for, not merely one that can host something.",
-  "R-neighborhood": "A venue Qloo files under, or near, the neighbourhood the brief names fits it; far from it doesn't. Without either it is unknown.",
+  "R-neighborhood": "A neighbourhood the brief names is part of its brief: a venue Qloo files there, or within 2 km, fits; 2–6 km is outside it; beyond 6 km is far. Without coordinates it is unknown.",
   "R-distinct-requested": "When the brief asks for independent, local or non-generic choices, a top-0.5% mainstream default counts against it.",
   "R-product-central": "A headline-scale act or an arena-scale room can make the product an afterthought.",
   "R-avoided-quality": "A choice Qloo describes with something the brief says to avoid counts against it.",
@@ -303,12 +303,12 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
               ? n.named
                 ? `Qloo places ${comp.label} in ${hood.value}, which the brief names ("${hood.phrase}").`
                 : `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, which the brief names ("${hood.phrase}").`
-              : n.fit === "far"
-                ? `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, which the brief names ("${hood.phrase}").`
+              : n.fit === "far" || n.fit === "outside"
+                ? `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, outside the neighbourhood the brief names ("${hood.phrase}").`
                 : `Whether ${comp.label} is in ${hood.value} can't be told from Qloo's coordinates.`,
-            n.fit === "near" ? "supports" : n.fit === "far" ? "contradicts" : "unknown",
+            n.fit === "near" ? "supports" : n.fit === "unknown" ? "unknown" : "contradicts",
             "qloo_locality",
-            n.fit === "unknown" ? "unknown" : "moderate",
+            n.fit === "unknown" ? "unknown" : n.fit === "outside" ? "thin" : "moderate",
             { ruleId: "R-neighborhood", evidenceIds: ctx.neighborhood ? [ctx.neighborhood.evidenceId] : [] },
           );
         }
@@ -493,10 +493,11 @@ const net = (claims: EvidenceClaim[], dims: EvidenceDimension[]) =>
 const PREFERENCE: Partial<Record<RuleId, number>> = { "R-user-choice": 0.5, "R-user-considered": 0.25 };
 
 /**
- * The decision policy (evidence:v2) as a vector, compared left to right:
+ * The decision policy (evidence:v4) as a vector, compared left to right:
  *   1. hard failures; 2. explicit locks kept; 3. completeness; 4. role and brief fit (with the
- *   user's unlocked choices as weighted preferences); 5. audience support, counted per choice so
- *   one exceptional affinity can't make up for weak ones; 6. locality and neighbourhood;
+ *   user's unlocked choices as weighted preferences, and the neighbourhood the brief names);
+ *   5. audience support, counted per choice so one exceptional affinity can't make up for weak
+ *   ones; 6. city locality;
  *   7. cross-component coherence; 8. distinctiveness; 9. evidence coverage, as confidence only.
  */
 export function evidenceVector(m: EvidenceMatrix, candidateId: string): number[] {
@@ -507,13 +508,15 @@ export function evidenceVector(m: EvidenceMatrix, candidateId: string): number[]
   const audience = mine.filter((c) => c.dimension === "audience" && c.slot);
   const choices = new Set(mine.filter((c) => c.dimension === "entity" && c.slot).map((c) => c.slot));
   const supportedAudience = new Set(audience.filter((c) => c.stance === "supports").map((c) => c.slot));
+  // A neighbourhood the brief names is part of the brief, so it ranks with brief fit, above affinity.
+  const hood = mine.filter((c) => c.ruleId === "R-neighborhood");
   return [
     -(m.hardFailures[candidateId]?.length ?? 0),
     locks.filter((c) => c.stance === "supports").length - locks.filter((c) => c.stance === "contradicts").length,
     m.completenessByCandidate[candidateId] ?? 0,
-    net(mine, ["role_fit"]) + preference,
+    net(mine, ["role_fit"]) + preference + net(hood, ["local"]),
     -(choices.size - supportedAudience.size),
-    net(mine, ["local"]),
+    net(mine.filter((c) => !hood.includes(c)), ["local"]),
     net(mine, ["coherence"]),
     // Distinctiveness ranks plans only when the brief asks for it (R-distinct-requested).
     net(mine.filter((c) => c.ruleId === "R-distinct-requested"), ["distinctiveness", "diversity"]),

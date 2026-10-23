@@ -7,7 +7,7 @@ import { evaluatePlan } from "@/lib/crashtest/evaluate";
 import { gatherEvidence, type GatherContext } from "@/lib/crashtest/gather";
 import { compileIntent } from "@/lib/crashtest/intent";
 import { BudgetExceeded, createLedger } from "@/lib/crashtest/ledger";
-import { buildEvidenceMatrix, type MatrixContext } from "@/lib/crashtest/matrix";
+import { buildEvidenceMatrix, compareVectors, evidenceVector, type MatrixContext } from "@/lib/crashtest/matrix";
 import { parallelView, toParallelMarkdown } from "@/lib/crashtest/parallel-view";
 import { toRef } from "@/lib/crashtest/plan";
 import { runCrashTest } from "@/lib/crashtest/run";
@@ -144,20 +144,21 @@ describe("v3: screens", () => {
     const far = venue("f1", "Far Hall", "event_venue", geo(51.4, -0.3));
     const brief = { ...LONDON_BRIEF, sourceText: "A pop-up in Shoreditch." };
     const shops = Array.from({ length: 6 }, (_, i) => entity(`s${i}`, { name: `Shop ${i}`, type: "urn:entity:place", geocode: geo(51.523 + i * 0.001, -0.077 - i * 0.001) }));
+    // Any track's plan with that venue: the rule is the same for every plan.
     const hoodClaim = (s: RunState, name: string) => {
-      const c = agentPlans(s).find((x) => label(x, "event_place") === name)!;
+      const c = s.parallel!.candidates.find((x) => label(x, "event_place") === name)!;
       return s.parallel!.matrix.claims.find((x) => x.candidateId === c.candidateId && x.ruleId === "R-neighborhood")!;
     };
 
     // With venues Qloo places in Shoreditch: near supports, far contradicts, and the agent picks near.
-    const located = await run(brief, {}, {}, [far, near], { "Shoreditch, London": shops });
+    const located = await run(brief, { draft: { venue: "Far Hall" } }, {}, [far, near], { "Shoreditch, London": shops });
     expect(located.p.agent!.contract.neighborhoods.map((n) => n.value)).toEqual(["Shoreditch"]);
     expect(hoodClaim(located.state, "Near Hall")).toMatchObject({ stance: "supports", source: "qloo_locality" });
     expect(hoodClaim(located.state, "Far Hall")).toMatchObject({ stance: "contradicts" });
     expect(label(cand(located.state, "agent"), "event_place")).toBe("Near Hall");
 
     // Without them, nothing is near or far: unknown, and Qloo's own ranking stands.
-    const unlocated = await run(brief, {}, {}, [far, near]);
+    const unlocated = await run(brief, { draft: { venue: "Far Hall" } }, {}, [far, near]);
     for (const n of ["Near Hall", "Far Hall"]) expect(hoodClaim(unlocated.state, n)).toMatchObject({ stance: "unknown", strength: "unknown" });
     expect(unlocated.p.agent!.pools.find((r) => r.name === "Far Hall")!.screens.locality).not.toBe("flag");
     expect(label(cand(unlocated.state, "agent"), "event_place")).toBe("Far Hall");
@@ -170,16 +171,69 @@ describe("v3: screens", () => {
     expect(label(cand(named.state, "agent"), "event_place")).toBe("Label Hall");
   });
 
-  it("reads a neighbourhood label as near, and a different label or distance alone as never far by name", () => {
+  it("reads a neighbourhood label as near, 2–6 km as outside, and a different label alone as never against it", () => {
     const at = (lat: number | null, lon: number | null, neighborhood: string | null = null) => ({ geocode: { city: "London", metro: null, countryCode: "GB", latitude: lat, longitude: lon, neighborhood } });
     const c = { name: "Shoreditch", lat: 51.524, lon: -0.078, count: 6, evidenceId: "e" };
     expect(neighborhoodFit(at(null, null, "Shoreditch"), null, "Shoreditch")).toMatchObject({ fit: "near", named: true, km: null });
     expect(neighborhoodFit(at(null, null, "Dalston"), null, "Shoreditch")).toMatchObject({ fit: "unknown", named: false });
     expect(neighborhoodFit(at(51.525, -0.079), c, "Shoreditch")).toMatchObject({ fit: "near", named: false });
     expect(neighborhoodFit(at(51.4, -0.3, "Dalston"), c, "Shoreditch").fit).toBe("far");
-    expect(neighborhoodFit(at(51.55, -0.12), c, "Shoreditch").fit).toBe("unknown");
+    // 2–6 km away is outside the neighbourhood, never local.
+    expect(neighborhoodFit(at(51.55, -0.12), c, "Shoreditch").fit).toBe("outside");
     // A label match wins over distance: Qloo says it is there.
     expect(neighborhoodFit(at(51.4, -0.3, "shoreditch"), c, "Shoreditch").fit).toBe("near");
+  });
+});
+
+describe("v3: a named neighbourhood is part of the brief", () => {
+  it("ranks a venue in it above a better-liked venue outside it, which no longer passes as local", async () => {
+    // Top for the audience, but 4 km from Shoreditch.
+    const liked = venue("o1", "Liked Hall", "event_venue", geo(51.5, -0.13));
+    // Found only through the neighbourhood list, with no audience affinity at all.
+    const inside = venue("i1", "Inside Hall", "event_venue", geo(51.5245, -0.0785));
+    const shops = Array.from({ length: 5 }, (_, i) => entity(`s${i}`, { name: `Shop ${i}`, type: "urn:entity:place", geocode: geo(51.523 + i * 0.001, -0.077 - i * 0.001) }));
+    // The LLM's own plan names the better-liked venue, so the same rule is seen on it.
+    const { state, p } = await run({ ...LONDON_BRIEF, sourceText: "A pop-up in Shoreditch." }, { draft: { venue: "Liked Hall" } }, {}, [liked], { "Shoreditch, London": [inside, ...shops] });
+    const pool = (n: string) => p.agent!.pools.find((r) => r.name === n)!;
+    expect(pool("Liked Hall").views.audience).toBe(1);
+    expect(pool("Inside Hall").views.audience).toBeUndefined();
+    expect(pool("Liked Hall").screens).toMatchObject({ hood: "outside", locality: "flag" });
+    expect(pool("Inside Hall").screens).toMatchObject({ hood: "near", locality: "pass" });
+    expect(label(cand(state, "agent"), "event_place")).toBe("Inside Hall");
+    // Screened and kept in reserve, not dropped; with venues in Shoreditch to compose, the beam
+    // doesn't spend complete-plan tests on one outside it.
+    expect(["pool", "reserve"]).toContain(pool("Liked Hall").outcome);
+    expect(label(cand(state, "llm"), "event_place")).toBe("Liked Hall");
+    expect(p.matrix.claims.find((c) => c.candidateId === "llm" && c.ruleId === "R-neighborhood")).toMatchObject({
+      stance: "contradicts",
+      strength: "thin",
+      claim: expect.stringMatching(/outside the neighbourhood the brief names/),
+    });
+  });
+
+  it("counts the neighbourhood with brief fit in the plan order, above audience support", () => {
+    const claim = (candidateId: string, ruleId: string | undefined, dimension: string, stance: string, strength = "moderate") =>
+      ({ candidateId, slot: "event_place", ruleId, dimension, stance, strength, claimId: `${candidateId}/${dimension}/${ruleId}`, claim: "", evidenceIds: [], limitations: [] });
+    const m = {
+      claims: [
+        claim("in", undefined, "entity", "supports"),
+        claim("in", "R-neighborhood", "local", "supports"),
+        claim("in", undefined, "audience", "contradicts"),
+        claim("out", undefined, "entity", "supports"),
+        claim("out", "R-neighborhood", "local", "contradicts", "thin"),
+        claim("out", undefined, "audience", "supports"),
+        claim("out", undefined, "local", "supports"),
+      ],
+      hardFailures: { in: [], out: [] },
+      completenessByCandidate: { in: 1, out: 1 },
+      coverageByCandidate: { in: 0.5, out: 1 },
+    } as unknown as ReturnType<typeof buildEvidenceMatrix>;
+    const [vi, vo] = [evidenceVector(m, "in"), evidenceVector(m, "out")];
+    expect(vi[3]).toBe(1);
+    expect(vo[3]).toBe(-0.5);
+    // City locality (level 6) no longer counts the neighbourhood claim.
+    expect(vo[5]).toBe(1);
+    expect(compareVectors(vi, vo)).toBeGreaterThan(0);
   });
 });
 
@@ -227,7 +281,7 @@ describe("v3: where the named neighbourhood is", () => {
 
 // ---------- complete-plan search ----------
 
-const ZERO: Proxy = { hard: 0, lock: 0, roleBad: 0, briefBad: 0, doubt: 0, weakAudience: 0, audience: 0, local: 0, distinct: 0 };
+const ZERO: Proxy = { hard: 0, lock: 0, roleBad: 0, briefBad: 0, hood: 0, doubt: 0, weakAudience: 0, audience: 0, local: 0, distinct: 0 };
 const pc = (slot: Slot, name: string, proxy: Partial<Proxy>): PoolCandidate => ({
   slot,
   component: { slot, label: name, origin: "agent_proposed", locked: false, resolution: "resolved", entity: null, tags: [], placeCategory: null } as Component,
@@ -378,7 +432,7 @@ describe("v3: honest outcomes and versions", () => {
     const { p } = await run();
     expect(PARALLEL_VERSION).toBe("parallel:v3");
     expect(p.architectureVersion).toBe("parallel:v3");
-    expect(p.config).toMatchObject({ contractVersion: "contract:v1", screensVersion: "screens:v2", beamWidth: BEAM_WIDTH, challengeRounds: 2, model: "fake" });
+    expect(p.config).toMatchObject({ contractVersion: "contract:v1", screensVersion: "screens:v3", beamWidth: BEAM_WIDTH, challengeRounds: 2, model: "fake" });
     expect(p.config!.promptsFingerprint).toMatch(/^[0-9a-f]{16}$/);
     expect(p.agent!.bundlesTested).toBeGreaterThan(0);
     for (const s of SLOTS.filter((s) => s !== "creative_direction")) expect(p.agent!.pools.some((r) => r.slot === s)).toBe(true);

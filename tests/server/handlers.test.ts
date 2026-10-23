@@ -20,6 +20,8 @@ const noDeps = () => {
   throw new Error("deps should not be needed");
 };
 const world = () => ({ qloo: worldClient().client, llm: worldLlm().llm });
+/** A replay is paced in real time (a short pause per recorded event), so a test that replays a whole run needs longer than the default. */
+const REPLAY_TIMEOUT = 15_000;
 
 describe("handleCrashTest", () => {
   it("rejects invalid briefs and unsupported cities", async () => {
@@ -54,7 +56,7 @@ describe("handleCrashTest", () => {
     expect(done(replayed).provenance?.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     const restored = JSON.parse(JSON.stringify(done(replayed))) as RunState;
     expect(restored.provenance?.mode).toBe("recorded");
-  });
+  }, REPLAY_TIMEOUT);
 
   it("runs live when asked for a fresh run, even with a recording", async () => {
     const cache = createMemoryCache(10, new Map());
@@ -101,7 +103,7 @@ describe("handleCrashTest", () => {
     } finally {
       delete process.env.RECOMMENDATION_ARCHITECTURE;
     }
-  });
+  }, REPLAY_TIMEOUT);
 
   it("refuses a live run when the limiter says so, but never a replay", async () => {
     const refuse = async () => new Response("slow down", { status: 429 });

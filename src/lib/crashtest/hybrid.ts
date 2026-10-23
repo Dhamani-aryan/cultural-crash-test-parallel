@@ -308,7 +308,7 @@ export async function optimize(input: OptimizeInput, deps: OptimizerDeps): Promi
       const pair = deps.matrix([incumbent, cand]);
       const hard = pair.hardFailures[cand.candidateId] ?? [];
       const fitOf = (id: string) =>
-        pair.claims.filter((c) => c.candidateId === id && c.stance === "supports" && (c.dimension === "role_fit" || c.claimId.endsWith("/user-intent"))).length;
+        pair.claims.filter((c) => c.candidateId === id && c.stance === "supports" && (c.dimension === "role_fit" || c.ruleId === "R-neighborhood" || c.claimId.endsWith("/user-intent"))).length;
       const verdict = judgeHybrid(incumbent.evaluation!, evaluation, hard, { before: fitOf(incumbent.candidateId), after: fitOf(cand.candidateId) });
       const attempt: HybridAttempt = {
         ...base,

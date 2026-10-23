@@ -267,6 +267,8 @@ export const LONDON_BRIEF = {
  * `places` answers location queries for a named neighbourhood ("Shoreditch, London").
  */
 export function withExtras(client: QlooClient, extras: QlooEntity[], places: Record<string, QlooEntity[]> = {}): QlooClient {
+  // Everything this world adds, wherever it is listed, has a full record to fetch.
+  const known = [...extras, ...Object.values(places).flat()];
   const result = (es: QlooEntity[]): InsightsResult => ({
     entities: es.map((e, i) => ({ ...e, rank: i + 1, affinity: 0.99 - i * 0.01, affinityRank: null, explainability: null })),
     tags: [],
@@ -281,7 +283,7 @@ export function withExtras(client: QlooClient, extras: QlooEntity[], places: Rec
       return [...own, ...(await client.searchEntities(input))];
     },
     async getEntities(ids) {
-      return [...extras.filter((e) => ids.includes(e.id)), ...(await client.getEntities(ids))];
+      return [...known.filter((e) => ids.includes(e.id)), ...(await client.getEntities(ids))];
     },
     async getInsights(input) {
       const loc = input.signalLocationQuery ?? input.filterLocationQuery ?? "";

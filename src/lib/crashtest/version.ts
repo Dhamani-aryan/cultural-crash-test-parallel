@@ -37,9 +37,10 @@ export const PARALLEL_VERSION = "parallel:v3";
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
  * structured role readings), weighted user preferences, and the v3 plan-comparison order, in
  * which distinctiveness ranks plans only when the brief asks for it. v3: a venue Qloo files under
- * the named neighbourhood is in it, and coordinates are read where Qloo returns them.
+ * the named neighbourhood is in it, and coordinates are read where Qloo returns them. v4: the
+ * named neighbourhood ranks with brief fit, above audience affinity, and 2–6 km from it is outside it.
  */
-export const EVIDENCE_RUBRIC_VERSION = "evidence:v3";
+export const EVIDENCE_RUBRIC_VERSION = "evidence:v4";
 /** The blind, order-rotated adjudication protocol. */
 export const ADJUDICATION_VERSION = "adjudicate:v1";
 

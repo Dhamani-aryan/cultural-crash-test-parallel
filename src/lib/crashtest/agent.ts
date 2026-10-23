@@ -64,6 +64,8 @@ export interface Proxy {
   lock: number;
   roleBad: number;
   briefBad: number;
+  /** In (+1), outside (-0.5) or far from (-1) a neighbourhood the brief names: brief fit, ranked above affinity. */
+  hood: number;
   /** Role doubts and centrality flags, net of the user's stated preference for it. */
   doubt: number;
   weakAudience: number;
@@ -84,12 +86,12 @@ export interface PoolCandidate {
   proxy: Proxy;
 }
 
-const ZERO: Proxy = { hard: 0, lock: 0, roleBad: 0, briefBad: 0, doubt: 0, weakAudience: 0, audience: 0, local: 0, distinct: 0 };
+const ZERO: Proxy = { hard: 0, lock: 0, roleBad: 0, briefBad: 0, hood: 0, doubt: 0, weakAudience: 0, audience: 0, local: 0, distinct: 0 };
 
 /** A partial or complete bundle's search order: the v3 plan-comparison order, on pre-test facts only. */
 export function bundleVector(parts: Proxy[]): number[] {
   const s = parts.reduce((a, p) => Object.fromEntries(Object.keys(a).map((k) => [k, a[k as keyof Proxy] + p[k as keyof Proxy]])) as unknown as Proxy, { ...ZERO });
-  return [-s.hard, s.lock, -s.roleBad, -s.briefBad, -s.doubt, -s.weakAudience, s.audience, s.local, -s.distinct];
+  return [-s.hard, s.lock, -s.roleBad, -s.briefBad, s.hood, -s.doubt, -s.weakAudience, s.audience, s.local, -s.distinct];
 }
 
 const sameEntity = (a: Component, b: Component) => (a.entity && b.entity ? a.entity.id === b.entity.id : nameKey(a.label) === nameKey(b.label));
@@ -238,6 +240,7 @@ function proxyOf(c: Omit<PoolCandidate, "proxy">, strength: "locked" | "preferre
     lock: strength === "locked" ? 1 : 0,
     roleBad: s.role === "fail" ? 1 : 0,
     briefBad: s.brief === "fail" ? 1 : s.brief === "flag" ? 0.5 : 0,
+    hood: s.hood === "near" ? 1 : s.hood === "outside" ? -0.5 : s.hood === "far" ? -1 : 0,
     doubt: (s.role === "doubtful" ? 1 : 0) + (s.central === "flag" ? 0.5 : 0) - (strength === "preferred" ? 0.5 : strength === "considered" ? 0.25 : 0),
     weakAudience: rank === undefined ? 1 : 0,
     audience: rank === undefined ? 0 : Math.max(0, 1 - (rank - 1) / VIEW_SIZE),
@@ -274,10 +277,13 @@ async function screenEntity(
   }
   const l = locality.get(e.id);
   let local = l ? (l.local ? "pass" : l.why === "from another country" ? "flag" : "unknown") : "unknown";
+  let hood: PoolRecord["screens"]["hood"];
   if (slot === "event_place") {
     const n = neighborhoodFit(e, input.neighborhood, contract.neighborhoods[0]?.value);
+    hood = n.fit;
+    // Outside a neighbourhood the brief names is never local, whatever the city list says.
     if (n.fit === "near") local = "pass";
-    if (n.fit === "far") local = "flag";
+    if (n.fit === "far" || n.fit === "outside") local = "flag";
     if (n.named) notes.push(`Qloo places it in ${contract.neighborhoods[0]?.value}`);
     if (n.km !== null) notes.push(`${n.km.toFixed(1)} km from ${contract.neighborhoods[0]?.value}`);
   }
@@ -293,6 +299,7 @@ async function screenEntity(
   return {
     role,
     locality: local,
+    hood,
     brief: briefScreen,
     distinct: mainstreamFlag(e.popularity, contract) ? "flag" : "pass",
     central: central ? "flag" : "pass",
@@ -644,7 +651,7 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     const cand: CandidatePlan = { ...asCandidate(plan, evaluation, { ...incumbent.sources, [weak.slot]: alt.source === "user" ? "user" : "agent" }, incumbent.candidateId), ...ids };
     tested.push(cand);
     const pair = input.matrix([incumbent, cand]);
-    const fit = (id: string) => pair.claims.filter((x) => x.candidateId === id && x.stance === "supports" && (x.dimension === "role_fit" || x.claimId.endsWith("/user-intent"))).length;
+    const fit = (id: string) => pair.claims.filter((x) => x.candidateId === id && x.stance === "supports" && (x.dimension === "role_fit" || x.ruleId === "R-neighborhood" || x.claimId.endsWith("/user-intent"))).length;
     const guard = judgeHybrid(incumbent.evaluation!, evaluation, pair.hardFailures[cand.candidateId] ?? [], { before: fit(incumbent.candidateId), after: fit(cand.candidateId) });
     // Material: better on the plan-comparison order before the coverage level, not just more coverage.
     const vi = evidenceVector(pair, incumbent.candidateId).slice(0, -1);
