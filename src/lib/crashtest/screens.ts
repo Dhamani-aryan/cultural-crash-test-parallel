@@ -10,9 +10,12 @@ import { venueFormat } from "./repair";
  * "unknown" when the evidence isn't there. Soft screens shape ranking and explanations; the
  * hard rules of the brief are elsewhere and stay vetoes. v2: neighbourhood fit reads Qloo's own
  * neighbourhood label and the coordinates Qloo returns (v1 never received coordinates). v3: 2–6 km
- * from a named neighbourhood is outside it, not unknown.
+ * from a named neighbourhood is outside it, not unknown. v4 (the agent's selection only; the
+ * evidence matrix keeps evidence:v4's host rule): a collaboration brand must be a product brand by
+ * Qloo's own tags, and a retail store, or a bar or restaurant when the brief isn't about food or a
+ * party, is at most a possible host, never a preferred one.
  */
-export const SCREENS_VERSION = "screens:v3";
+export const SCREENS_VERSION = "screens:v4";
 
 const cat = (c: string) => `urn:tag:category:place:${c}`;
 
@@ -40,6 +43,50 @@ export function hostTier(tagIds: string[], contract: IntentContract, foodAndDrin
   if (tagIds.some((t) => preferred.has(t))) return "preferred";
   return format === "can_host" ? "possible" : "unknown";
 }
+
+/** Retail: another business's shop is not a host the brief's format calls for. */
+const RETAIL = /^urn:tag:category:place:(.+_store|.+_shop|boutique|shopping_mall|department_store|outlet_mall)$/;
+/** Somewhere to eat or drink: a host only when the brief is about food, drink or a party. */
+const FOOD_OR_DRINK = /^urn:tag:category:place:(bar|.+_bar|pub|lounge|restaurant|.+_restaurant|cafe|coffee_shop|bakery|bistro|brewery|brewpub|beer_garden)$/;
+const NIGHTLIFE = /^urn:tag:category:place:night_club$/;
+
+/**
+ * The agent's stricter reading of hostTier, for selecting its own venue. A venue is preferred only
+ * through a category the format calls for that is not retail and, unless the brief is about food,
+ * drink or a party, not somewhere to eat or drink (or, unless a party, a night club). Otherwise a
+ * venue that hostTier would prefer is only possible: affinity alone can't make a shop or a
+ * restaurant the launch venue.
+ */
+export function selectionHostTier(tagIds: string[], contract: IntentContract, foodAndDrink: boolean): "preferred" | "possible" | "unsuitable" | "unknown" {
+  const tier = hostTier(tagIds, contract, foodAndDrink);
+  if (tier !== "preferred") return tier;
+  const food = foodAndDrink || wantsFormat(contract, "bar", "food_and_drink");
+  const party = wantsFormat(contract, "party", "listening_party");
+  const preferred = new Set(preferredCategories(contract, foodAndDrink));
+  const strong = tagIds.filter((t) => preferred.has(t) && !RETAIL.test(t) && !(FOOD_OR_DRINK.test(t) && !food && !party) && !(NIGHTLIFE.test(t) && !party && !food));
+  return strong.length ? "preferred" : "possible";
+}
+
+/** Brand genres that describe something other than a product brand. */
+const NOT_A_PRODUCT = /^(cultural arts|media|news & politics|website|.*\bapp|professional services|entertainment|education|government|non-?profit|charity|publishing)$/i;
+const tagName = (t: { id: string; name: string | null }) => (t.name ?? t.id.split(":").at(-1)?.replace(/_/g, " ") ?? "").trim();
+
+/**
+ * Is a collaboration candidate a product brand, by Qloo's own tags? A product category, or a brand
+ * genre that describes products, says yes. Only "Cultural Arts" genres: an institution (a museum or
+ * gallery), not a brand to co-launch with. Only media, app, service or similar genres: not a product
+ * brand. No genre tags at all: unknown, never a failure.
+ */
+export function brandRole(e: Pick<QlooEntity, "tags">): { kind: "product" | "institution" | "not_product" | "unknown"; genres: string[] } {
+  if (e.tags.some((t) => (t.type ?? t.id).startsWith("urn:tag:product_category"))) return { kind: "product", genres: [] };
+  const genres = e.tags.filter((t) => (t.type ?? t.id).startsWith("urn:tag:genre:brand")).map(tagName).filter(Boolean);
+  if (!genres.length) return { kind: "unknown", genres };
+  if (genres.some((g) => !NOT_A_PRODUCT.test(g))) return { kind: "product", genres };
+  return { kind: genres.some((g) => /^cultural arts$/i.test(g)) ? "institution" : "not_product", genres };
+}
+
+/** A top-0.5% name in any slot: a global prestige default, which can make a plan narratively generic. */
+export const PRESTIGE = 0.995;
 
 export interface Centroid {
   name: string;

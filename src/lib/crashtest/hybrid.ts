@@ -128,6 +128,7 @@ const REASON: Record<NonNullable<HybridAttempt["rejectionCode"]>, string> = {
   better_candidate_selected: "Another hybrid tested better this round.",
   duplicate: "It is the same plan as one already tested.",
   repeated_plan: "It is a plan already tested.",
+  generic_bundle: "It makes the plan a bundle of global prestige defaults with nothing local.",
   locked: "It would change a choice the brief fixes.",
 };
 

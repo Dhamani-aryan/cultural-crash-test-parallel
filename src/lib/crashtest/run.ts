@@ -18,6 +18,7 @@ import {
   SLOT_LABEL,
   type CandidateTrial,
   type CulturalPlan,
+  type EntityRef,
   type LaunchBriefInput,
   type PlanChange,
   type PlanEvaluation,
@@ -57,6 +58,11 @@ export interface RunOptions {
    * LLM draft and its resolution are skipped, so two agent versions start from identical plans.
    */
   start?: { plan: CulturalPlan; assumptions: string[] };
+  /**
+   * Parallel runs: measure against these already-resolved audience anchors instead of choosing
+   * them (frozen evaluation), so repeated runs and different versions use the same audience.
+   */
+  anchors?: { anchors: EntityRef[]; source: "user" | "model_hypothesis"; from: string };
   /** Sequential (the control) or parallel three-track; defaults to RECOMMENDATION_ARCHITECTURE, then sequential. */
   architecture?: Architecture;
   /** Parallel runs: the n-th blind ID (tests make them deterministic; live runs use random ones). */

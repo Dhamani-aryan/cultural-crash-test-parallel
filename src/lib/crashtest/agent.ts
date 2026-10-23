@@ -13,7 +13,7 @@ import { itemsFrom, sanitizeInsights } from "./ledger";
 import { compareVectors, evidenceVector, roleKey } from "./matrix";
 import { briefText, categoryOf, directionVocabulary, mapDirection, resolveEntityComponent, toRef } from "./plan";
 import { briefTerms, categoryOfVenue, fitsBrief, isFoodAndDrink, repairDirection, screen, type DraftTrial } from "./repair";
-import { avoidedMatch, centralityFlag, distanceKm, hostTier, mainstreamFlag, neighborhoodFit, preferredCategories, type Centroid, type RoleCheck } from "./screens";
+import { PRESTIGE, avoidedMatch, brandRole, centralityFlag, distanceKm, mainstreamFlag, neighborhoodFit, preferredCategories, selectionHostTier, type Centroid, type RoleCheck } from "./screens";
 import {
   SLOTS,
   SLOT_LABEL,
@@ -91,7 +91,8 @@ const ZERO: Proxy = { hard: 0, lock: 0, roleBad: 0, briefBad: 0, hood: 0, doubt:
 /** A partial or complete bundle's search order: the v3 plan-comparison order, on pre-test facts only. */
 export function bundleVector(parts: Proxy[]): number[] {
   const s = parts.reduce((a, p) => Object.fromEntries(Object.keys(a).map((k) => [k, a[k as keyof Proxy] + p[k as keyof Proxy]])) as unknown as Proxy, { ...ZERO });
-  return [-s.hard, s.lock, -s.roleBad, -s.briefBad, s.hood, -s.doubt, -s.weakAudience, s.audience, s.local, -s.distinct];
+  // Requested distinctiveness ranks with brief fit, above affinity (screens:v4).
+  return [-s.hard, s.lock, -s.roleBad, -s.briefBad, s.hood, -s.distinct, -s.doubt, -s.weakAudience, s.audience, s.local];
 }
 
 const sameEntity = (a: Component, b: Component) => (a.entity && b.entity ? a.entity.id === b.entity.id : nameKey(a.label) === nameKey(b.label));
@@ -265,8 +266,15 @@ async function screenEntity(
     role = "fail";
     notes.push("hard: the launching brand itself");
   }
+  if (slot === "brand_collaboration" && role !== "fail") {
+    // Qloo's own tags say whether it is a product brand at all (screens:v4).
+    const b = brandRole(e);
+    if (b.kind === "institution") role = "fail";
+    if (b.kind === "not_product") role = "doubtful";
+    if (b.kind !== "product") notes.push(`brand: ${b.kind === "institution" ? "an institution, not a brand" : b.kind === "not_product" ? "not a product brand" : "Qloo doesn't say"}${b.genres.length ? ` (${b.genres.join(", ")})` : ""}`);
+  }
   if (slot === "event_place") {
-    const tier = hostTier(e.tags.map((t) => t.id), contract, food);
+    const tier = selectionHostTier(e.tags.map((t) => t.id), contract, food);
     if (tier === "unsuitable") role = "fail";
     else if (tier !== "preferred") role = "doubtful";
     notes.push(`host: ${tier}`);
@@ -416,6 +424,8 @@ async function entityPool(input: AgentInput, slot: EntitySlot, fixed: Component[
     const screens: PoolRecord["screens"] = e
       ? await screenEntity(input, slot, e, locality)
       : { role: "unknown", locality: "unknown", brief: "unknown", distinct: "pass", central: "unknown", notes: ["not in Qloo: unverified"] };
+    // A soft role screen never drops a choice the user named; only the brief's hard rules do.
+    if (screens.role === "fail" && !screens.notes.some((n) => n.startsWith("hard:"))) screens.role = "doubtful";
     const seen = cands.findIndex((c) => user.component.entity && c.component.entity?.id === user.component.entity.id);
     if (seen >= 0) cands.splice(seen, 1);
     cands.unshift({ slot, component: user.component, entity: e, source: "user", views: seen >= 0 ? entities.find((x) => x.e.id === e?.id)?.views ?? {} : {}, evidenceIds: [], lanes: [], screens });
@@ -508,6 +518,7 @@ const ROUND_REASON: Record<string, string> = {
   plan_regression: "It costs a supported choice without removing a contradiction.",
   no_improvement: "The whole-plan re-test showed no material improvement.",
   repeated_plan: "It is a plan already tested.",
+  generic_bundle: "It makes the plan a bundle of global prestige defaults with nothing local.",
 };
 
 /** The slot whose recorded claims are weakest, as a structured failure hypothesis (locked slots are never challenged). */
@@ -531,6 +542,59 @@ export function weakestSlot(c: CandidatePlan, m: EvidenceMatrix, locked: Set<Slo
       ? `${SLOT_LABEL[worst.slot]} "${label}" is the weakest choice: ${worst.claims.map((x) => x.claim).slice(0, 2).join(" ") || "no audience support was found."}`
       : `${SLOT_LABEL[worst.slot]} is open.`,
   };
+}
+
+/**
+ * What the agent's own screens say against a complete plan (screens:v4), for its selection only:
+ * wrong or doubtful roles, generic defaults when the brief asks for distinctive choices, venues
+ * outside the neighbourhood the brief names, and the whole-plan guard: two or more global prestige
+ * defaults, or one with nothing local, make a narratively generic bundle. Locked choices are never
+ * counted against a plan, and a choice the user named isn't counted as generic or outside.
+ */
+export function selectionFlags(plan: CulturalPlan, screensOf: (c: Component) => PoolRecord["screens"] | undefined, contract: IntentContract): SelectionFlags {
+  const notes: SelectionFlags["notes"] = [];
+  let role = 0;
+  let intent = 0;
+  let prestige = 0;
+  let local = 0;
+  for (const c of plan.components) {
+    if (c.slot === "creative_direction" || c.locked) continue;
+    const s = screensOf(c);
+    if (!s) continue;
+    const user = c.origin === "user_provided";
+    if (s.role === "fail" || s.role === "doubtful") {
+      role += s.role === "fail" ? 1 : 0.5;
+      notes.push({ slot: c.slot, label: c.label, why: s.notes.find((n) => n.startsWith("brand:") || n.startsWith("host:") || n.startsWith("role check")) ?? "its role is doubtful" });
+    }
+    if (!user && s.distinct === "flag") {
+      intent += 1;
+      notes.push({ slot: c.slot, label: c.label, why: "a top-0.5% mainstream default, and the brief asks for independent or non-generic choices" });
+    }
+    if (!user && (s.hood === "outside" || s.hood === "far")) {
+      intent += 1;
+      notes.push({ slot: c.slot, label: c.label, why: `outside ${contract.neighborhoods[0]?.value ?? "the neighbourhood the brief names"}` });
+    }
+    if (!user && (c.entity?.popularity ?? 0) >= PRESTIGE) prestige++;
+    if (s.locality === "pass" || s.hood === "near") local++;
+  }
+  const guard = prestige >= 2 ? "two or more global prestige defaults" : prestige === 1 && local === 0 ? "a global prestige default and nothing local" : null;
+  return { role, intent, guard, notes };
+}
+
+export interface SelectionFlags {
+  role: number;
+  intent: number;
+  guard: string | null;
+  notes: { slot: Slot; label: string; why: string }[];
+}
+
+/**
+ * The agent's selection order: the evidence vector's hard rules, locks and completeness first, then
+ * its own role screen, the whole-plan guard and the brief's distinctiveness and neighbourhood
+ * intent, then the rest of the evidence vector (brief fit, audience, locality, …, coverage last).
+ */
+export function agentKey(ev: number[], f: SelectionFlags): number[] {
+  return [...ev.slice(0, 3), -f.role, f.guard ? -1 : 0, -f.intent, ...ev.slice(3)];
 }
 
 export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> {
@@ -608,15 +672,23 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     }
   }
   if (!tested.length) throw new Error("The agent couldn't compose any plan from its candidates.");
+  // How the agent's own screens read each component, for selecting among complete plans.
+  const screenBy = new Map<string, PoolRecord["screens"]>();
+  for (const list of [...pools.values(), ...reserves.values()]) for (const c of list) screenBy.set(roleKey(c.component), c.screens);
+  const flagsOf = (plan: CulturalPlan) => selectionFlags(plan, (c) => screenBy.get(roleKey(c)), contract);
+  const keyOf = (m: EvidenceMatrix, c: CandidatePlan) => agentKey(evidenceVector(m, c.candidateId), flagsOf(c.plan));
   const m0 = input.matrix(tested);
-  let incumbent = [...tested].sort((a, b) => compareVectors(evidenceVector(m0, b.candidateId), evidenceVector(m0, a.candidateId)))[0];
+  let incumbent = [...tested].sort((a, b) => compareVectors(keyOf(m0, b), keyOf(m0, a)))[0];
 
   // The challenge loop: the weakest choice, one substitution, a whole-plan re-test.
   const rounds: ImprovementRound[] = [];
   const tried = new Set<string>(incumbent.plan.components.map((c) => `${c.slot}:${c.entity?.id ?? c.label}`));
   for (let r = 1; stop !== "budget" && r <= input.rounds; r++) {
     const m = input.matrix([incumbent]);
-    const weak = weakestSlot(incumbent, m, lockedSlots);
+    // A choice the agent's own screens flag (wrong role, a generic default the brief asks to avoid,
+    // outside the named neighbourhood) is challenged first; otherwise the weakest recorded claims.
+    const flag = flagsOf(incumbent.plan).notes.find((n) => !lockedSlots.has(n.slot));
+    const weak = flag ? { slot: flag.slot, claimIds: [], statement: `${SLOT_LABEL[flag.slot]} "${flag.label}": ${flag.why}.` } : weakestSlot(incumbent, m, lockedSlots);
     if (!weak) {
       stop = "no_weakness";
       break;
@@ -624,7 +696,10 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     const round: ImprovementRound = { round: r, incumbent: incumbent.candidateId, challenges: [{ kind: "weak_evidence", candidateId: incumbent.candidateId, slot: weak.slot, detail: weak.statement, claimIds: weak.claimIds }], attempts: [], hypothesis: weak };
     rounds.push(round);
     const others = incumbent.plan.components.filter((c) => c.slot !== weak.slot);
-    const alt = [...(pools.get(weak.slot) ?? []), ...(reserves.get(weak.slot) ?? [])].find((c) => !tried.has(`${c.slot}:${c.component.entity?.id ?? c.component.label}`) && !others.some((o) => sameEntity(o, c.component)));
+    // The best-standing untried candidate for that slot.
+    const alt = [...(pools.get(weak.slot) ?? []), ...(reserves.get(weak.slot) ?? [])]
+      .filter((c) => !tried.has(`${c.slot}:${c.component.entity?.id ?? c.component.label}`) && !others.some((o) => sameEntity(o, c.component)))
+      .sort((a, b) => compareVectors(bundleVector([b.proxy]), bundleVector([a.proxy])))[0];
     if (!alt) {
       stop = "no_alternative";
       break;
@@ -653,11 +728,15 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     const pair = input.matrix([incumbent, cand]);
     const fit = (id: string) => pair.claims.filter((x) => x.candidateId === id && x.stance === "supports" && (x.dimension === "role_fit" || x.ruleId === "R-neighborhood" || x.claimId.endsWith("/user-intent"))).length;
     const guard = judgeHybrid(incumbent.evaluation!, evaluation, pair.hardFailures[cand.candidateId] ?? [], { before: fit(incumbent.candidateId), after: fit(cand.candidateId) });
-    // Material: better on the plan-comparison order before the coverage level, not just more coverage.
-    const vi = evidenceVector(pair, incumbent.candidateId).slice(0, -1);
-    const vc = evidenceVector(pair, cand.candidateId).slice(0, -1);
+    // Material: better on the agent's selection order before the coverage level, not just more
+    // coverage. Hard rules and lost brief fit always reject; the selection order replaces the plain
+    // supported-choice count, so a distinctive choice can replace a better-liked generic one.
+    const vi = keyOf(pair, incumbent).slice(0, -1);
+    const vc = keyOf(pair, cand).slice(0, -1);
     const better = compareVectors(vc, vi) > 0;
-    const code = guard.rejectionCode && guard.rejectionCode !== "no_improvement" ? guard.rejectionCode : better ? undefined : "no_improvement";
+    const generic = !!flagsOf(cand.plan).guard && !flagsOf(incumbent.plan).guard;
+    const vetoed = guard.rejectionCode === "hard_failure" || guard.rejectionCode === "constraint_conflict" || guard.rejectionCode === "brief_fit_lost" ? guard.rejectionCode : undefined;
+    const code = vetoed ?? (generic ? "generic_bundle" : better ? undefined : "no_improvement");
     round.attempts.push({ ...base, accepted: !code, rejectionCode: code, reason: code ? ROUND_REASON[code] : `${alt.component.label} replaces ${incumbent.plan.components.find((c) => c.slot === weak.slot)?.label ?? "the open slot"}: ${weak.statement}`, retest: guard.retest });
     if (code) {
       stop = "no_improvement";
@@ -675,7 +754,7 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     assumptions: incumbent.open.map((o) => `${SLOT_LABEL[o.slot]} left open: ${o.reason}`),
     tested,
     trials,
-    record: { contract, beamWidth: width, pools: records, bundlesTested: tested.length, rounds, stop },
+    record: { contract, beamWidth: width, pools: records, bundlesTested: tested.length, rounds, stop, selection: flagsOf(incumbent.plan) },
   };
 }
 

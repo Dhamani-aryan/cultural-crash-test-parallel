@@ -258,7 +258,15 @@ export async function runParallelCrashTest(
       state.assumptions.push(`Hard constraint "${c.description}" isn't machine-checkable; it is shown to the model but not enforced in code.`);
 
     stage("anchors", "Choosing the audience every plan will be measured against");
-    const anchored = await timed("shared", () => measurementAnchors({ llm: llmFor("shared"), ctx: ctxFor("shared"), brief }));
+    const anchored = opts.anchors
+      ? {
+          anchors: opts.anchors.anchors,
+          source: opts.anchors.source,
+          notes: [
+            `Audience anchors frozen from ${opts.anchors.from}: ${opts.anchors.anchors.map((a) => a.name).join(", ")}${opts.anchors.source === "model_hypothesis" ? " (model-suggested there; a person should confirm them)" : ""}.`,
+          ],
+        }
+      : await timed("shared", () => measurementAnchors({ llm: llmFor("shared"), ctx: ctxFor("shared"), brief }));
     anchorSource = anchored.source;
     anchorNotes = anchored.notes;
     state.assumptions.push(...anchored.notes);
@@ -462,6 +470,7 @@ export async function runParallelCrashTest(
           .digest("hex")
           .slice(0, 16),
         sampling: "provider default (no temperature or seed is set); outputs are not deterministic",
+        anchorsFrozenFrom: opts.anchors?.from,
       },
     };
   state.finishedAt = new Date().toISOString();

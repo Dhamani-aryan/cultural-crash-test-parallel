@@ -432,7 +432,7 @@ describe("v3: honest outcomes and versions", () => {
     const { p } = await run();
     expect(PARALLEL_VERSION).toBe("parallel:v3");
     expect(p.architectureVersion).toBe("parallel:v3");
-    expect(p.config).toMatchObject({ contractVersion: "contract:v1", screensVersion: "screens:v3", beamWidth: BEAM_WIDTH, challengeRounds: 2, model: "fake" });
+    expect(p.config).toMatchObject({ contractVersion: "contract:v1", screensVersion: "screens:v4", beamWidth: BEAM_WIDTH, challengeRounds: 2, model: "fake" });
     expect(p.config!.promptsFingerprint).toMatch(/^[0-9a-f]{16}$/);
     expect(p.agent!.bundlesTested).toBeGreaterThan(0);
     for (const s of SLOTS.filter((s) => s !== "creative_direction")) expect(p.agent!.pools.some((r) => r.slot === s)).toBe(true);

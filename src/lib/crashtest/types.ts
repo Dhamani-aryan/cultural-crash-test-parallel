@@ -567,7 +567,7 @@ export interface HybridAttempt {
   kind: "union" | "swap" | "search" | "challenge";
   slot?: Slot;
   accepted: boolean;
-  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked" | "brief_fit_lost" | "repeated_plan";
+  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked" | "brief_fit_lost" | "repeated_plan" | "generic_bundle";
   reason: string;
   retest?: {
     supportedBefore: number;
@@ -616,6 +616,8 @@ export interface AgentRecord {
   bundlesTested: number;
   rounds: ImprovementRound[];
   stop: "no_weakness" | "no_improvement" | "no_alternative" | "repeated_plan" | "round_limit" | "budget";
+  /** screens:v4: what the agent's own screens say against the plan it kept. */
+  selection?: import("./agent").SelectionFlags;
 }
 
 export interface FinalVerdict {
@@ -681,4 +683,6 @@ export interface RunConfig {
   promptsFingerprint: string;
   /** The provider doesn't expose temperature or a seed here; outputs are not deterministic. */
   sampling: string;
+  /** Where the run's audience anchors were frozen from, when they were. */
+  anchorsFrozenFrom?: string;
 }

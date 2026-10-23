@@ -9,13 +9,16 @@
  * RECOMMENDATION_ARCHITECTURE=parallel runs the parallel engine instead and writes to
  * eval/out/scenario-runs-parallel and eval/out/scenario-summary-parallel.json, so it never
  * overwrites the sequential baseline. SCENARIO_TAG=<tag> picks another suffix.
+ *
+ * FROZEN_ANCHORS=<file> (see eval/freeze-anchors.ts) measures each scenario against the audience
+ * anchors frozen there instead of asking the model again, so repeats are comparable.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { runCrashTest } from "../src/lib/crashtest/run";
 import { architectureFrom, runVersionFor } from "../src/lib/crashtest/version";
 import { isFrozen } from "./frozen";
 import { existingVersions, outputRefusal } from "./output-guard";
-import type { RunState } from "../src/lib/crashtest/types";
+import type { EntityRef, RunState } from "../src/lib/crashtest/types";
 import { createMemoryCache } from "../src/lib/cache/cache";
 import { getQlooEnv } from "../src/lib/env";
 import type { IntakeState } from "../src/lib/intake/types";
@@ -30,6 +33,9 @@ const input = JSON.parse(readFileSync(intakeFile, "utf8")) as {
   rows: { id: string; title: string; readyForReview?: boolean; state?: IntakeState; error: string | null }[];
 };
 const only = new Set(process.argv.slice(2).filter((x) => x !== "--"));
+const frozenAnchors = process.env.FROZEN_ANCHORS
+  ? (JSON.parse(readFileSync(process.env.FROZEN_ANCHORS, "utf8")) as { from: string; scenarios: Record<string, { anchors: EntityRef[]; source: "user" | "model_hypothesis" }> })
+  : null;
 const selected = input.rows.filter((row) => row.readyForReview && row.state && (!only.size || only.has(row.id)));
 if (!selected.length) throw new Error("No review-ready scenarios selected.");
 
@@ -66,7 +72,13 @@ for (const row of selected) {
   process.stdout.write(`${row.id} … `);
   const started = Date.now();
   try {
-    const state = await runCrashTest(deps, toLaunchBrief(row.state!), { runVersion: RUN_VERSION, architecture: ARCHITECTURE });
+    const frozen = frozenAnchors?.scenarios[row.id];
+    if (frozenAnchors && !frozen) throw new Error(`${process.env.FROZEN_ANCHORS} has no anchors for ${row.id}`);
+    const state = await runCrashTest(deps, toLaunchBrief(row.state!), {
+      runVersion: RUN_VERSION,
+      architecture: ARCHITECTURE,
+      anchors: frozen ? { ...frozen, from: frozenAnchors!.from } : undefined,
+    });
     writeFileSync(`${directory}/${row.id}.json`, JSON.stringify(state, null, 2));
     const first = state.evaluations[0];
     const last = state.evaluations.at(-1);
