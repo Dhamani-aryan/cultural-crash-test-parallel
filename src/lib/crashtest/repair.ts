@@ -86,7 +86,7 @@ const domainOf = (slot: Slot): Domain =>
   slot === "artist_music" ? "artist" : slot === "brand_collaboration" ? "brand" : "place";
 
 /** Cheap locality screen with the original's category lists (already cached by the evaluation). */
-async function screen(
+export async function screen(
   ctx: GatherContext,
   domain: Domain,
   category: string[],
@@ -754,6 +754,7 @@ export async function repairEntity(input: {
     local: "local list",
     coherence: "fit with the plan",
     proposals: "your suggestions",
+    neighborhood: "the named neighbourhood",
   };
   const viewText = (id: string, rank: number) =>
     fused
@@ -844,7 +845,7 @@ export async function repairEntity(input: {
 }
 
 /** The first suitable category a venue is filed under, to test it among venues of its own kind. */
-function categoryOfVenue(e: QlooEntity): string | null {
+export function categoryOfVenue(e: QlooEntity): string | null {
   return (
     e.tags
       .map((t) => t.id)

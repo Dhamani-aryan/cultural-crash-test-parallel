@@ -47,6 +47,8 @@ export interface WorldOptions {
   artistCandidates?: QlooEntity[];
   /** Fail every Insights call with this error. */
   insightsError?: Error;
+  /** Kinds no Qloo list returns at all (neither the audience lists nor the city's own list). */
+  noCandidates?: ("artist" | "brand")[];
 }
 
 export function worldClient(opts: WorldOptions = {}) {
@@ -90,6 +92,8 @@ export function worldClient(opts: WorldOptions = {}) {
       if (input.resultEntities) {
         return asResult(all.filter((e) => input.resultEntities!.includes(e.id) && e !== W.usRapper));
       }
+      const kind = input.filterType === T.artist ? "artist" : input.filterType === T.brand ? "brand" : "place";
+      if (kind !== "place" && opts.noCandidates?.includes(kind)) return asResult([]);
       const exclude = new Set(input.excludeEntities ?? []);
       if (input.signalEntities?.length) {
         if (loc !== "London") return asResult([]);
@@ -162,6 +166,8 @@ export function worldLlm(
     anchors?: { name: string; country: string }[];
     /** The country the model gives for every act or brand the user named. */
     choiceCountry?: string;
+    /** The structured role check's reading of a candidate, by label (default: fits, keeps the product central). */
+    roles?: Record<string, { verdict: "fits" | "doubtful" | "wrong"; central?: boolean; reason?: string }>;
   } = {},
 ) {
   const prompts: string[] = [];
@@ -225,6 +231,19 @@ export function worldLlm(
       }
       if (system.startsWith("Revise a launch's creative direction") || system.startsWith("Write a launch's creative direction"))
         return reply({ tags: ["Industrial"], direction: "Industrial", reason: "Top here.", expectedEffect: "Supported." });
+      if (system.startsWith("You screen candidates for one job")) {
+        // Every candidate fits unless the test reads it otherwise; ids are copied from the prompt.
+        return reply({
+          candidates: prompt
+            .split("\n")
+            .map((l) => l.match(/^(c\d+): (.+?)(?: — |$)/))
+            .filter((m): m is RegExpMatchArray => !!m)
+            .map(([, id, label]) => {
+              const r = over.roles?.[label];
+              return { id, verdict: r?.verdict ?? "fits", central: r?.central ?? true, reason: r?.reason ?? (r?.verdict === "wrong" ? `${label} can't do this job.` : `${label} can do this job.`) };
+            }),
+        });
+      }
       if (system.startsWith("Write a 2-3 sentence")) return reply("Verdict from the recorded facts.");
       throw new Error(`no scripted reply for: ${system.slice(0, 50)}`);
     },
@@ -241,3 +260,40 @@ export const LONDON_BRIEF = {
   audienceAnchors: ["Northcap", "Deckhouse"],
   depth: "quick" as const,
 };
+
+/**
+ * Add made-up entities to the synthetic world: each ranks above the world's own in every list of
+ * its type for London (audience and city lists), is scored like any other, and resolves by name.
+ * `places` answers location queries for a named neighbourhood ("Shoreditch, London").
+ */
+export function withExtras(client: QlooClient, extras: QlooEntity[], places: Record<string, QlooEntity[]> = {}): QlooClient {
+  const result = (es: QlooEntity[]): InsightsResult => ({
+    entities: es.map((e, i) => ({ ...e, rank: i + 1, affinity: 0.99 - i * 0.01, affinityRank: null, explainability: null })),
+    tags: [],
+    aggregateExplainability: null,
+    durationMs: null,
+  });
+  return {
+    ...client,
+    async searchEntities(input) {
+      const q = nameKey(input.query.replace(/ London$/, ""));
+      const own = extras.filter((e) => nameKey(e.name) === q && (!input.types || input.types.includes(e.type ?? ""))).map((e, i) => ({ ...e, rank: i + 1 }));
+      return [...own, ...(await client.searchEntities(input))];
+    },
+    async getEntities(ids) {
+      return [...extras.filter((e) => ids.includes(e.id)), ...(await client.getEntities(ids))];
+    },
+    async getInsights(input) {
+      const loc = input.signalLocationQuery ?? input.filterLocationQuery ?? "";
+      if (places[loc]) return result(places[loc]);
+      const base = await client.getInsights(input);
+      if (input.resultEntities) {
+        const own = extras.filter((e) => input.resultEntities!.includes(e.id));
+        return { ...base, entities: [...result(own).entities, ...base.entities].map((e, i) => ({ ...e, rank: i + 1 })) };
+      }
+      if (loc !== "London" || (input.page ?? 1) > 1 || input.filterType === "urn:tag") return base;
+      const own = extras.filter((e) => e.type === input.filterType && !(input.excludeEntities ?? []).includes(e.id));
+      return { ...base, entities: [...result(own).entities, ...base.entities].map((e, i) => ({ ...e, rank: i + 1, affinity: 0.99 - i * 0.01 })) };
+    },
+  };
+}

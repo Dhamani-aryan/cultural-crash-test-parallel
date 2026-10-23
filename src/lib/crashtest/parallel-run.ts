@@ -5,17 +5,21 @@ import type { QlooClient, QlooEntity } from "@/lib/qloo";
 import { adjudicate } from "./adjudicate";
 import { evaluatePlan } from "./evaluate";
 import { gatherEvidence, type GatherContext } from "./gather";
-import { componentRank, optimize, planProgress, rankBetter, type OptimizeResult } from "./hybrid";
+import { createHash } from "node:crypto";
+import { CHALLENGE_ROUNDS, BEAM_WIDTH, ROLE_SYSTEM, checkRemainingRoles, neighborhoodCentroid, planFingerprint, runEvidenceAgent } from "./agent";
+import { JUDGE_SYSTEM } from "./adjudicate";
+import { componentRank, optimize, rankBetter, type OptimizeResult } from "./hybrid";
+import { CONTRACT_VERSION, compileIntent, type IntentContract } from "./intent";
 import { BudgetExceeded, budgeted, createLedger, memoized, scopedLedger } from "./ledger";
 import { buildEvidenceMatrix, claimsOf, type MatrixContext } from "./matrix";
 import { QueryRequestSchema, parseQuery, type QueryRequest } from "./query";
-import { repairDirection, repairEntity, type DraftTrial } from "./repair";
 import type { RunDeps, RunOptions } from "./run";
+import { SCREENS_VERSION, type Centroid, type RoleCheck } from "./screens";
 import {
-  agentAlternatives,
+  ANCHOR_HYPOTHESIS_SYSTEM,
+  CHOICE_COUNTRIES_SYSTEM,
   buildUserTrack,
   freezeBrief,
-  generateAgentTrack,
   generateLlmDraft,
   measurementAnchors,
   resolveLlmTrack,
@@ -30,6 +34,7 @@ import {
   SLOT_LABEL,
   COMPONENT_STATE_LABEL,
   type AdjudicationResult,
+  type AgentRecord,
   type CandidatePlan,
   type CandidateTrial,
   type ComponentAssessment,
@@ -57,10 +62,6 @@ import { ADJUDICATION_VERSION, EVIDENCE_RUBRIC_VERSION, PARALLEL_VERSION, rankin
  * user's, the LLM's, the agent's or a hybrid; nothing here assumes the agent wins.
  */
 
-/** Improvement rounds: thorough runs get the plan's three, quick runs one. */
-export const ROUNDS = { quick: 1, thorough: 3 } as const;
-/** Complete agent alternatives evaluated beside its first pick. */
-export const ALTERNATIVES = { quick: 1, thorough: 2 } as const;
 
 class Cancelled extends Error {}
 
@@ -96,7 +97,9 @@ export async function runParallelCrashTest(
   const brief = LaunchBriefSchema.parse(briefInput);
   const frozen = freezeBrief(brief);
   const depth = { ...DEPTHS[brief.depth], ...opts.limits };
-  const maxRounds = opts.limits?.maxRepairs ?? ROUNDS[brief.depth];
+  // The agent's own challenge rounds; across tracks, one bounded round of tested hybrids follows.
+  const maxRounds = opts.limits?.maxRepairs ?? CHALLENGE_ROUNDS[brief.depth];
+  const beamWidth = opts.limits?.beamWidth ?? BEAM_WIDTH;
 
   const state: RunState = {
     runId: opts.runId ?? randomUUID(),
@@ -221,11 +224,19 @@ export async function runParallelCrashTest(
   };
   let anchorSource: ParallelResult["anchorSource"] = "none";
   let anchorNotes: string[] = [];
+  let contract: IntentContract | null = null;
+  let neighborhood: Centroid | null = null;
+  let agentRecord: AgentRecord | undefined;
+  // Structured role readings, shared so every track's components are screened alike.
+  const roleChecks = new Map<string, RoleCheck>();
   const mctx = (): MatrixContext => ({
     brief,
     city: market.label,
     facts,
     anchorSource,
+    contract: contract ?? undefined,
+    roleChecks,
+    neighborhood,
     resolutionEvidence: (id) =>
       ledger.records
         .filter((r) => (r.queryKind === "search" || r.queryKind === "locality") && r.qlooEntityIds.includes(id) && !r.purpose.startsWith("The model judged"))
@@ -258,44 +269,61 @@ export async function runParallelCrashTest(
     }
     const anchors = anchored.anchors;
 
-    stage("tracks", "Building three plans independently: yours as given, the LLM's alone, and the evidence-first agent's");
+    // The brief-intent contract and the named neighbourhood: shared inputs to every screen and explanation.
+    contract = compileIntent(brief, market, { names: anchors.map((a) => a.name), source: anchored.source });
+    neighborhood = contract.neighborhoods.length ? await timed("shared", () => neighborhoodCentroid(ctxFor("shared"), contract!).catch((err) => {
+      if (err instanceof BudgetExceeded) throw err;
+      return null;
+    })) : null;
+    // The user's named acts and brands get the same namesake protection as any name, once, shared.
+    const countries = await timed("shared", () => userChoiceCountries(llmFor("shared"), brief, market));
+
+    stage("tracks", "Building three plans independently: yours as given, the LLM's alone, and the evidence agent's");
     const t0 = Date.now();
-    // The user's named acts and brands get the same namesake protection as any name: their
-    // countries come from the brief alone, once, shared by every track that keeps them.
-    const userP = timed("shared", () => userChoiceCountries(llmFor("shared"), brief, market)).then((countries) =>
-      timed("user", () => buildUserTrack({ llm: llmFor("user"), ctx: ctxFor("user"), brief, anchors, countries })),
-    );
+    const userP = timed("user", () => buildUserTrack({ llm: llmFor("user"), ctx: ctxFor("user"), brief, anchors, countries }));
     const llmP = timed("llm", async () => {
       const draft = await generateLlmDraft(llmFor("llm"), frozen, market);
-      return resolveLlmTrack({ llm: llmFor("llm"), ctx: ctxFor("llm"), brief, draft, anchors });
+      return resolveLlmTrack({ llm: llmFor("llm"), ctx: ctxFor("llm"), brief, draft, anchors, countries });
     });
-    // The agent starts from the user's own resolved choices (a deep copy), never from the LLM's plan.
-    const agentP = userP.then((u) =>
-      timed("agent", () => generateAgentTrack({ llm: llmFor("agent"), ctx: ctxFor("agent"), brief, anchors, user: structuredClone(u.plan.components) })),
+    // The single evidence agent: the frozen brief, the anchors, the contract and the locks. Not the
+    // user's plan (an unlocked user choice is only a candidate), and never the LLM's.
+    let agentN = 0;
+    const agentP = timed("agent", () =>
+      runEvidenceAgent({
+        llm: llmFor("agent"),
+        ctx: ctxFor("agent"),
+        brief,
+        contract: contract!,
+        anchors,
+        countries,
+        neighborhood,
+        roleChecks,
+        facts,
+        evaluate: async (plan) => {
+          await ensureFacts([plan]);
+          return evaluateIn("agent")(plan);
+        },
+        matrix: matrixOf,
+        newIds: () => ({ candidateId: `agent-b${++agentN}`, blindId: blindId() }),
+        briefFingerprint: frozen.fingerprint,
+        rounds: maxRounds,
+        beamWidth,
+      }),
     );
     const [u, l, a] = await Promise.all([userP, llmP, agentP]);
+    agentRecord = a.record;
 
-    stage("evaluate", "Testing all three plans with the same Qloo checks");
+    stage("evaluate", "Testing all three plans with the same Qloo checks and the same screens");
     const [ue, le] = await Promise.all([timed("user", () => evaluateIn("user")(u.plan)), timed("llm", () => evaluateIn("llm")(l.plan))]);
+    await ensureFacts([u.plan, l.plan]);
+    // Every plan gets the same structured role reading the agent's candidates got.
+    await timed("shared", () => checkRemainingRoles(llmFor("shared"), ctxFor("shared"), brief, contract!, [u.plan, l.plan], roleChecks, facts));
     const U = candidate("user", "user", u, ue, snapshot("user", t0));
     const L = candidate("llm", "llm", l, le, snapshot("llm", t0));
-    // The agent's first pick and its complete alternatives are each evaluated; the strongest is Track A.
-    const altPlans = agentAlternatives(a, ALTERNATIVES[brief.depth]);
-    const agentEvals = await timed("agent", async () => {
-      const out: PlanEvaluation[] = [];
-      for (const p of [a.plan, ...altPlans]) out.push(await evaluateIn("agent")(p));
-      return out;
-    });
-    const agentPlans = [a.plan, ...altPlans];
-    let bestAt = 0;
-    agentEvals.forEach((e, i) => {
-      if (i && planProgress(agentEvals[bestAt], e).material) bestAt = i;
-    });
-    const A = candidate("agent", "agent", { ...a, plan: agentPlans[bestAt] }, agentEvals[bestAt], snapshot("agent", t0));
-    agentPlans.forEach((p, i) => {
-      if (i === bestAt) return;
-      alternatives.push(candidate("agent", `agent-alt-${alternatives.length + 1}`, { ...a, plan: p }, agentEvals[i], snapshot("agent", t0), "agent"));
-    });
+    const A = candidate("agent", "agent", { plan: a.plan, open: a.open, sources: a.sources, assumptions: a.assumptions }, a.evaluation, snapshot("agent", t0));
+    const chosen = planFingerprint(a.plan);
+    for (const t of a.tested)
+      if (planFingerprint(t.plan) !== chosen) alternatives.push({ ...t, candidateId: `agent-alt-${alternatives.length + 1}`, parent: "agent" });
     state.trials!.push(...a.trials.map((t): CandidateTrial => ({ ...t, iteration: 0 })));
     candidates.push(U, L, A, ...alternatives);
     contenders = [U, L, A];
@@ -307,57 +335,26 @@ export async function runParallelCrashTest(
       adjudicate({ llm: llmFor("adjudication"), stage: "initial", candidates: contenders, matrix: matrixOf(contenders), brief, market, ledger: scopedLedger(ledger, "adjudication") }),
     );
 
-    stage("improve", "Challenging the leading plan and re-testing hybrids as complete plans");
+    // The agent challenged its own plan already; across tracks, one bounded round of tested
+    // hybrids (the strongest component per slot, and single swaps), each re-tested whole.
+    stage("improve", "Testing hybrids of the three plans as complete plans");
     const leader = initial.winnerCandidateId ?? initial.evidenceOrder[0];
     let hybridN = 0;
     improvement = await timed("improvement", () =>
       optimize(
-        { brief, contenders, incumbentId: leader, maxRounds, flagged: initial!.flagged },
+        { brief, contenders, incumbentId: leader, maxRounds: 1, flagged: initial!.flagged },
         {
           evaluate: async (plan) => {
             await ensureFacts([plan]);
             return evaluateIn("improvement")(plan);
           },
-          search: async (slot, inc) => {
-            state.currentIteration++;
-            const comp = inc.plan.components.find((c) => c.slot === slot);
-            const assessment: ComponentAssessment = inc.evaluation?.components.find((c) => c.slot === slot) ?? {
-              slot,
-              label: comp?.label ?? "",
-              status: "unresolved",
-              coverage: "insufficient",
-              dimensions: [],
-              finding: "Open slot: nothing chosen yet.",
-              contradicted: false,
-            };
-            const plan = comp ? inc.plan : { ...inc.plan, components: SLOTS.flatMap((s) => (s === slot ? [{ slot, label: "", origin: "agent_proposed" as const, locked: false, resolution: "not_found" as const, entity: null, tags: [], placeCategory: null }] : inc.plan.components.filter((c) => c.slot === s))) };
-            const upgrade = !!comp && !assessment.contradicted;
-            if (slot === "creative_direction") {
-              const p = await repairDirection({ llm: llmFor("improvement"), ctx: ctxFor("improvement"), brief, plan, assessment, upgrade, initial: !comp });
-              const trials: DraftTrial[] = p ? [{ slot, name: p.after.label, source: "llm_proposal", evidenceIds: p.evidenceIds, briefFit: "unknown" }] : [];
-              return { proposals: p ? [p] : [], trials };
-            }
-            const r = await repairEntity({
-              llm: llmFor("improvement"),
-              ctx: ctxFor("improvement"),
-              brief,
-              plan,
-              slot,
-              assessment,
-              rejected: [...candidates, ...alternatives].flatMap((c) => c.plan.components.filter((x) => x.slot === slot && x.label !== comp?.label).map((x) => x.label)),
-              upgrade,
-              initial: !comp,
-            });
-            await ensureFacts(r.proposals.map((p) => ({ anchors: [], components: [p.after] })));
-            return r;
-          },
+          search: async () => ({ proposals: [], trials: [] }),
           matrix: matrixOf,
           newIds: () => ({ candidateId: `hybrid-${++hybridN}`, blindId: blindId() }),
         },
       ),
     );
     if (improvement.stop === "budget") budgetHit = true;
-    state.trials!.push(...improvement.trials.map((t): CandidateTrial => ({ ...t, iteration: state.currentIteration })));
     candidates.push(...improvement.hybrids);
     if (improvement.incumbent.track === "hybrid") contenders = [...contenders, improvement.incumbent];
 
@@ -418,16 +415,16 @@ export async function runParallelCrashTest(
   state.plan = chosen?.plan ?? null;
   state.evaluations = [contenders.find((c) => c.candidateId === "llm")?.evaluation, finalEval].filter((e): e is PlanEvaluation => !!e);
   state.unresolvedQuestions = verdict.humanChecks;
-  state.currentIteration = improvement?.rounds.length ?? 0;
+  state.currentIteration = agentRecord?.rounds.length ?? 0;
   if (!state.stopReason) {
-    const stop: StopReason = budgetHit ? "api_budget_limit" : improvement?.stop === "round_limit" ? "iteration_limit" : "no_material_improvement";
+    const stop: StopReason = budgetHit || agentRecord?.stop === "budget" ? "api_budget_limit" : agentRecord?.stop === "round_limit" ? "iteration_limit" : "no_material_improvement";
     state.stopReason = stop;
     state.stopDetail =
       stop === "api_budget_limit"
         ? `${counted.used()} Qloo calls used.`
         : stop === "iteration_limit"
-          ? `${maxRounds} improvement round(s) used.`
-          : "The last improvement round accepted no hybrid.";
+          ? `The agent used its ${maxRounds} challenge round(s).`
+          : `The agent stopped challenging its plan: ${AGENT_STOP[agentRecord?.stop ?? "no_improvement"]}`;
   }
   state.qlooCallsUsed = counted.used();
   state.qlooUsage = {
@@ -451,11 +448,35 @@ export async function runParallelCrashTest(
       final: fin,
       verdict,
       usage,
+      agent: agentRecord,
+      config: {
+        model: deps.llm.model,
+        ranking,
+        contractVersion: CONTRACT_VERSION,
+        screensVersion: SCREENS_VERSION,
+        beamWidth,
+        challengeRounds: maxRounds,
+        maxQlooCalls: state.maxQlooCalls,
+        promptsFingerprint: createHash("sha256")
+          .update([JUDGE_SYSTEM, ROLE_SYSTEM, ANCHOR_HYPOTHESIS_SYSTEM, CHOICE_COUNTRIES_SYSTEM].join("\n---\n"))
+          .digest("hex")
+          .slice(0, 16),
+        sampling: "provider default (no temperature or seed is set); outputs are not deterministic",
+      },
     };
   state.finishedAt = new Date().toISOString();
   emit({ type: "done", state });
   return state;
 }
+
+const AGENT_STOP: Record<AgentRecord["stop"], string> = {
+  no_weakness: "no choice had a recorded weakness.",
+  no_improvement: "the last substitution didn't materially improve the whole plan.",
+  no_alternative: "no untried candidate was left for its weakest choice.",
+  repeated_plan: "the substitution led back to a plan already tested.",
+  round_limit: "it used every round.",
+  budget: "the Qloo budget ran out.",
+};
 
 function finalVerdict(x: {
   chosen: CandidatePlan | null;
@@ -519,7 +540,7 @@ function finalVerdict(x: {
               : "Ranked lower on the recorded evidence.",
     });
   }
-  for (const c of x.alternatives) rejected.push({ candidateId: c.candidateId, reason: "A complete alternative the agent evaluated; its first choice tested at least as well." });
+  for (const c of x.alternatives) rejected.push({ candidateId: c.candidateId, reason: "A complete plan the agent tested; the plan it kept ranked higher on the evidence order." });
   for (const r of x.improvement?.rounds ?? []) for (const a of r.attempts) if (!a.accepted) rejected.push({ candidateId: a.candidateId, reason: a.reason });
 
   const limitations = new Set<string>(["Qloo affinity is cultural evidence. It does not show sales, attendance, availability, budget fit or causation."]);
@@ -531,6 +552,7 @@ function finalVerdict(x: {
     verdict: fin.verdict,
     stable: fin.verdict === "winner" && x.decidedBy === "adjudication",
     decidedBy: x.decidedBy,
+    provisional: !!chosen && x.decidedBy === "evidence_order",
     plan: chosen?.plan ?? null,
     open: chosen?.open ?? [],
     evaluation: x.finalEval,

@@ -52,9 +52,17 @@ describe("parallel architecture: independent tracks", () => {
 
   it("2. the agent's initial track never reads the LLM's choices", async () => {
     const { state, calls } = await run(LONDON_BRIEF, { draft: { artist: "Zed Unheard", brand: "Qwerty Label", venue: "Nowhere Hall", direction: "Baroque neon" } });
+    const llmNames = ["Zed Unheard", "Qwerty Label", "Nowhere Hall", "Baroque neon"];
     const generation = beforeJudging(calls).filter((c) => !c.system.startsWith("You are a brand strategist") && !c.system.startsWith("Map a creative direction"));
     expect(generation.length).toBeGreaterThan(0);
-    for (const c of generation) for (const n of ["Zed Unheard", "Qwerty Label", "Nowhere Hall", "Baroque neon"]) expect(c.prompt).not.toContain(n);
+    // After all three tracks finish, every plan's components get the same shared role screen;
+    // that screen (and only it) may name the LLM's choices, and nothing of the agent runs after it.
+    const isRole = (c: { system: string }) => c.system.startsWith("You screen candidates");
+    const shared = generation.findIndex((c) => isRole(c) && llmNames.some((n) => c.prompt.includes(n)));
+    expect(shared).toBeGreaterThan(0);
+    expect(generation.slice(shared).every(isRole)).toBe(true);
+    for (const c of generation.slice(0, shared)) for (const n of llmNames) expect(c.prompt).not.toContain(n);
+    for (const r of state.parallel!.agent!.pools) expect(llmNames).not.toContain(r.name);
     const agent = cand(state, "agent");
     for (const comp of agent.plan.components) {
       expect(["Zed Unheard", "Qwerty Label", "Nowhere Hall", "Baroque neon"]).not.toContain(comp.label);
@@ -90,23 +98,30 @@ describe("parallel architecture: independent tracks", () => {
 
   it("5. a user's choice Qloo doesn't know is kept everywhere and flagged, never upgraded", async () => {
     const { state, p } = await run({ ...LONDON_BRIEF, existingChoices: [{ slot: "brand_collaboration", name: "Hackney Clay Collective" }] });
-    for (const c of p.candidates.filter((x) => x.track !== "hybrid")) expect(label(c, "brand_collaboration")).toBe("Hackney Clay Collective");
+    // The user's plan keeps it exactly; the agent is free to test alternatives, but its own
+    // record of the choice says unverified, never a failure, and it stays in the agent's pool.
+    expect(label(cand(state, "user"), "brand_collaboration")).toBe("Hackney Clay Collective");
+    const pooled = p.agent!.pools.find((r) => r.name === "Hackney Clay Collective")!;
+    expect(pooled).toMatchObject({ source: "user", outcome: "pool", screens: { role: "unknown", brief: "unknown" } });
+    expect(pooled.screens.notes).toContain("not in Qloo: unverified");
     expect(state.plan!.components.find((c) => c.slot === "brand_collaboration")).toMatchObject({ label: "Hackney Clay Collective", resolution: "not_found" });
     expect(p.matrix.componentStates[p.verdict.candidateId!].brand_collaboration).toBe("needs_human");
     expect(p.verdict.humanChecks.join(" ")).toMatch(/Hackney Clay Collective/);
-    // Unknown is not a contradiction.
-    const claim = p.matrix.claims.find((c) => c.candidateId === "user" && c.slot === "brand_collaboration" && c.dimension === "entity")!;
-    expect(claim.stance).toBe("unknown");
+    // Unknown is not a contradiction, in any plan that keeps it.
+    const claims = p.matrix.claims.filter((c) => c.slot === "brand_collaboration" && c.dimension === "entity" && p.candidates.find((k) => k.candidateId === c.candidateId) && label(cand(state, c.candidateId), "brand_collaboration") === "Hackney Clay Collective");
+    expect(claims.length).toBeGreaterThan(0);
+    for (const c of claims) expect(c.stance).toBe("unknown");
   });
 
   it("gives the user's named choices namesake protection, identically in every track", async () => {
     // Qloo's only "Big Tex" is American; the user means one from India, so it must not be tested as him.
     const { p } = await run({ ...LONDON_BRIEF, existingChoices: [{ slot: "artist_music", name: "Big Tex" }] }, { choiceCountry: "India" });
-    for (const id of ["user", "agent"]) {
-      const a = p.candidates.find((c) => c.candidateId === id)!.plan.components.find((c) => c.slot === "artist_music")!;
-      expect(a).toMatchObject({ label: "Big Tex", resolution: "ambiguous", entity: null, origin: "user_provided" });
-    }
-    expect(p.verdict.humanChecks.join(" ")).toMatch(/Big Tex/);
+    const bigTex = p.candidates.flatMap((c) => c.plan.components.filter((x) => x.slot === "artist_music" && x.label === "Big Tex"));
+    // The user's plan, the LLM's (which keeps the named choice) and every agent plan that tests it.
+    expect(bigTex.length).toBeGreaterThanOrEqual(3);
+    for (const a of bigTex) expect(a).toMatchObject({ resolution: "ambiguous", entity: null, origin: "user_provided" });
+    expect(p.agent!.pools.find((r) => r.name === "Big Tex")).toMatchObject({ source: "user", entityId: undefined });
+    expect(p.candidates.find((c) => c.candidateId === "user")!.plan.components[0]).toMatchObject({ label: "Big Tex", entity: null });
   });
 
   it("6. model-suggested anchors may be broadened; anchors the user named may not", async () => {
@@ -228,8 +243,8 @@ describe("parallel architecture: any plan can win", () => {
   });
 
   it("14. the LLM's plan can win", async () => {
-    // Qloo has no music act candidates here, so the agent leaves the act open; the LLM names one.
-    const { p } = await run(LONDON_BRIEF, { draft: { artist: "Grey Lane" } }, { artistCandidates: [] });
+    // Qloo lists no music act here, so the agent leaves the act open; the LLM names one.
+    const { p } = await run(LONDON_BRIEF, { draft: { artist: "Grey Lane" } }, { noCandidates: ["artist"] });
     expect(cand({ parallel: p } as RunState, "agent").open.map((o) => o.slot)).toContain("artist_music");
     expect(p.verdict).toMatchObject({ candidateId: "llm", track: "llm" });
   });
@@ -240,8 +255,8 @@ describe("parallel architecture: any plan can win", () => {
   });
 
   it("16. a hybrid can win, and then the agent's plan loses", async () => {
-    // No brand shows the "vinyl" attribute, so the agent leaves the brand open; the LLM's act is contradicted.
-    const { state, p } = await run({ ...LONDON_BRIEF, brandAttributes: ["vinyl"] });
+    // Qloo lists no brand here, so the agent leaves the brand open; the LLM's act is contradicted.
+    const { state, p } = await run(LONDON_BRIEF, {}, { noCandidates: ["brand"] });
     expect(cand(state, "agent").open.map((o) => o.slot)).toEqual(["brand_collaboration"]);
     expect(p.verdict.track).toBe("hybrid");
     expect(p.verdict.sources).toMatchObject({ artist_music: "agent", brand_collaboration: "llm" });
@@ -306,7 +321,7 @@ describe("parallel architecture: bounded improvement", () => {
   });
 
   it("18. hybrids are accepted only after a complete-plan re-test", async () => {
-    const { p } = await run({ ...LONDON_BRIEF, brandAttributes: ["vinyl"] });
+    const { p } = await run(LONDON_BRIEF, {}, { noCandidates: ["brand"] });
     const accepted = p.rounds.flatMap((r) => r.attempts.filter((a) => a.accepted));
     expect(accepted.length).toBeGreaterThan(0);
     for (const a of accepted) {

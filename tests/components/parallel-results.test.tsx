@@ -7,8 +7,8 @@ import { runCrashTest } from "@/lib/crashtest/run";
 import type { LaunchBriefInput, RunState } from "@/lib/crashtest/types";
 import { LONDON_BRIEF, worldClient, worldLlm } from "../crashtest/world";
 
-const parallel = (brief: LaunchBriefInput = LONDON_BRIEF, llm: Parameters<typeof worldLlm>[0] = {}) =>
-  runCrashTest({ qloo: worldClient().client, llm: worldLlm(llm).llm }, brief, { architecture: "parallel", blindId: (n) => `P${n}`, runVersion: "test" });
+const parallel = (brief: LaunchBriefInput = LONDON_BRIEF, llm: Parameters<typeof worldLlm>[0] = {}, world: Parameters<typeof worldClient>[0] = {}) =>
+  runCrashTest({ qloo: worldClient(world).client, llm: worldLlm(llm).llm }, brief, { architecture: "parallel", blindId: (n) => `P${n}`, runVersion: "test" });
 
 describe("parallel results", () => {
   it("shows You, LLM, Evidence-first agent and Final verdict for every choice, with Not specified for open user slots", async () => {
@@ -30,7 +30,7 @@ describe("parallel results", () => {
   });
 
   it("names where each final choice came from", async () => {
-    const view = parallelView(await parallel({ ...LONDON_BRIEF, brandAttributes: ["vinyl"] }))!;
+    const view = parallelView(await parallel(LONDON_BRIEF, {}, { noCandidates: ["brand"] }))!;
     expect(view.summary.winnerTrack).toBe("H");
     expect(view.rows.find((r) => r.slot === "artist_music")!.final.source).toBe("From the evidence-first agent");
     expect(view.rows.find((r) => r.slot === "brand_collaboration")!.final.source).toBe("From the LLM");
@@ -47,7 +47,7 @@ describe("parallel results", () => {
   });
 
   it("22. a replayed (serialised) state gives the same comparison, decision path and report", async () => {
-    const state = await parallel({ ...LONDON_BRIEF, brandAttributes: ["vinyl"] });
+    const state = await parallel(LONDON_BRIEF, {}, { noCandidates: ["brand"] });
     const replayed = JSON.parse(JSON.stringify({ ...state, provenance: { mode: "recorded", recordedAt: "2026-10-22T00:00:00Z", runVersion: "test" } })) as RunState;
     expect(parallelView(replayed)).toEqual(parallelView(state));
     expect(toParallelMarkdown(replayed)).toEqual(toParallelMarkdown(state));
@@ -56,7 +56,7 @@ describe("parallel results", () => {
   });
 
   it("draws three branches from the brief into one blind comparison and a final verdict", async () => {
-    const { path } = parallelView(await parallel({ ...LONDON_BRIEF, brandAttributes: ["vinyl"] }))!;
+    const { path } = parallelView(await parallel(LONDON_BRIEF, {}, { noCandidates: ["brand"] }))!;
     expect(path.edges.filter((e) => e.source === "brief" && e.relation === "generated").map((e) => e.target)).toEqual(["track:user", "track:llm", "track:agent"]);
     expect(path.nodes.find((n) => n.id === "adjudication:initial")).toBeDefined();
     expect(path.nodes.some((n) => n.kind === "hybrid" && n.state === "accepted")).toBe(true);

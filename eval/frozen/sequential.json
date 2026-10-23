@@ -1,0 +1,84 @@
+{
+  "tag": "sequential",
+  "commit": "e217f3f",
+  "runVersion": "crash:v15",
+  "recordedAt": "2026-10-22T18:02:43.886Z",
+  "files": {
+    "eval/out/scenario-intake.json": {
+      "bytes": 70675,
+      "sha256": "55c3c0340966b8e27aaa083f4c1aa5644322d1e418d5b09665ed61ce770fffbb"
+    },
+    "eval/out/scenario-runs/accessories-mumbai.json": {
+      "bytes": 186059,
+      "sha256": "d492b5f13ef73e0b1e88de75beeb9dd887a4cb7844856096cdc0799b0c71c905"
+    },
+    "eval/out/scenario-runs/cocktail-bar-mexico-city.json": {
+      "bytes": 623835,
+      "sha256": "c522dc0c5ec5e1c86ac9d7810fa738b4d56b15bb7387e3d21e41336350e7b02a"
+    },
+    "eval/out/scenario-runs/eyewear-tokyo.json": {
+      "bytes": 365094,
+      "sha256": "62b641df7f44ee2569f3f0e0785324e66770a095d8b7aa3da7f7bb91ca8981d9"
+    },
+    "eval/out/scenario-runs/fragrance-berlin.json": {
+      "bytes": 413622,
+      "sha256": "cb0a08f03280d3ea8fdce998c93f8c1bff44fb88c3a16383f06ff39d6461990e"
+    },
+    "eval/out/scenario-runs/headphones-toronto.json": {
+      "bytes": 325937,
+      "sha256": "65aa0a4954b4c9b33cb7e02a34e70828ae5b9410191fa4eb765da6d5ae24e28b"
+    },
+    "eval/out/scenario-runs/jewelry-paris.json": {
+      "bytes": 288481,
+      "sha256": "d242779d9b2a21d656ef4b403480cccca5c3fe1b1cf27ea54cfc02d595ca185c"
+    },
+    "eval/out/scenario-runs/luxury-handbags-london.json": {
+      "bytes": 265358,
+      "sha256": "476b5002483e9d49cc4d5e6eadc8d848db6550322eacd7ffcda00b02fafe4c96"
+    },
+    "eval/out/scenario-runs/non-alcoholic-london.json": {
+      "bytes": 444695,
+      "sha256": "ad62be3896b9998ddc2ca10f5bb3d50f2d942bc7c927cf4714366731a0a6ad6b"
+    },
+    "eval/out/scenario-runs/sneaker-festival-london.json": {
+      "bytes": 242258,
+      "sha256": "7e6e2b3b703eb27556694261e526127fe6f89748833e11ff544af937ddf7be94"
+    },
+    "eval/out/scenario-runs/sneakers-madrid.json": {
+      "bytes": 368381,
+      "sha256": "9451327565081e126a3ff151aa454500cb69f3b7dbaedf106e5b6b629836b419"
+    },
+    "eval/out/scenario-runs/speakeasy-new-york.json": {
+      "bytes": 389032,
+      "sha256": "fdf4aeea7cbf1f9be029e61e62abf953ddaaf2106a5366b9b86f1a63da53c270"
+    },
+    "eval/out/scenario-runs/streetwear-mumbai.json": {
+      "bytes": 176221,
+      "sha256": "442322dcf2d878a0ce0a720de35befc87b87a1d096929642c84fdd7666f2cbc1"
+    },
+    "eval/out/scenario-runs/streetwear-new-york.json": {
+      "bytes": 305547,
+      "sha256": "3c0d236efea69a856dbc3fc0e57fe5e0376f6584cba786423120be195494311a"
+    },
+    "eval/out/scenario-runs/streetwear-sao-paulo.json": {
+      "bytes": 276116,
+      "sha256": "cd9d45643c88055beefd1e275432325155d5c0dda2e86b27ecc10fe854a52eb0"
+    },
+    "eval/out/scenario-runs/sun-care-sydney.json": {
+      "bytes": 177251,
+      "sha256": "12f4d02ecd54877f683edfa11283dca36fae67673b455b95a294a789d7e2edc2"
+    },
+    "eval/out/scenario-runs/upcycled-denim-tokyo.json": {
+      "bytes": 337685,
+      "sha256": "4be8d3e05e2a993361aa30bc78d43cd53915f2123019c8aa7ab868b158776416"
+    },
+    "eval/out/scenario-runs/vintage-fashion-tokyo.json": {
+      "bytes": 300727,
+      "sha256": "76137aa522508baa9e9cb9f2f5560a745d548c3115746c196b45a26d8e15efca"
+    },
+    "eval/out/scenario-summary.json": {
+      "bytes": 33266,
+      "sha256": "2744d425e71374248c2fe355b69d6755833cf42386499c7f528ae6e360d81409"
+    }
+  }
+}

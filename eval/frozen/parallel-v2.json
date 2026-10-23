@@ -1,0 +1,72 @@
+{
+  "tag": "parallel-v2",
+  "commit": "40aa69d",
+  "runVersion": "crash:v15+parallel:v2",
+  "recordedAt": "2026-10-22T18:02:41.972Z",
+  "files": {
+    "eval/out/scenario-runs-parallel-v2/accessories-mumbai.json": {
+      "bytes": 739319,
+      "sha256": "77d71293af578709f5acc2c98bbd11f8bb747723920990dff103c66341811bad"
+    },
+    "eval/out/scenario-runs-parallel-v2/cocktail-bar-mexico-city.json": {
+      "bytes": 541743,
+      "sha256": "8fdb6375fd9e04c8b3616cf85b6b678f2e7ae75121161ff1ddeb90a627d8b3f6"
+    },
+    "eval/out/scenario-runs-parallel-v2/eyewear-tokyo.json": {
+      "bytes": 509948,
+      "sha256": "12b6ed39a34847a01f29f29519ce6d8ec790c6dbd144df4deb46de1ff10acdaa"
+    },
+    "eval/out/scenario-runs-parallel-v2/fragrance-berlin.json": {
+      "bytes": 624461,
+      "sha256": "ef34cbd2ff1345a605efabd5fb6aca077764c4d2580ad2ab000ed76cbf326605"
+    },
+    "eval/out/scenario-runs-parallel-v2/headphones-toronto.json": {
+      "bytes": 496922,
+      "sha256": "31415e8115d2069004f1431e15dbc68bf37d405f126c7b277179a3307130333d"
+    },
+    "eval/out/scenario-runs-parallel-v2/jewelry-paris.json": {
+      "bytes": 588559,
+      "sha256": "d479e61c77a941651e9ffae33cb20b21a995dd8cd1567e804a277eadfd900601"
+    },
+    "eval/out/scenario-runs-parallel-v2/luxury-handbags-london.json": {
+      "bytes": 452250,
+      "sha256": "c61c8a6bfbf4389ed12b0a1562d8e4e6c15338207c26fb1ba85e75ed29b7d50a"
+    },
+    "eval/out/scenario-runs-parallel-v2/non-alcoholic-london.json": {
+      "bytes": 601313,
+      "sha256": "606414a04fa2708a1d165069d8e0f7017fff23348ae5860f57f2c4038ececb9d"
+    },
+    "eval/out/scenario-runs-parallel-v2/sneakers-madrid.json": {
+      "bytes": 527599,
+      "sha256": "8dbed59102fae5cc5f497282b5469fc2894094857c612842cd489a905b50041c"
+    },
+    "eval/out/scenario-runs-parallel-v2/speakeasy-new-york.json": {
+      "bytes": 822496,
+      "sha256": "752e39358260615c198a273b0ebe3502e15a403a19ca248f3c47d880ac19f16d"
+    },
+    "eval/out/scenario-runs-parallel-v2/streetwear-mumbai.json": {
+      "bytes": 457148,
+      "sha256": "0262e6c36024499c7539d89382ac27782b63ddaae17101023910c8656898e918"
+    },
+    "eval/out/scenario-runs-parallel-v2/streetwear-new-york.json": {
+      "bytes": 555189,
+      "sha256": "f900789b73be1f259f8d938a4aa7f404af2a642ebd4cb92f6eb358b2b9f3c885"
+    },
+    "eval/out/scenario-runs-parallel-v2/streetwear-sao-paulo.json": {
+      "bytes": 488733,
+      "sha256": "fb05e4280d4b0b49610f9144765c633d17541fc5f0d2f780800e9bcd07f04620"
+    },
+    "eval/out/scenario-runs-parallel-v2/sun-care-sydney.json": {
+      "bytes": 559388,
+      "sha256": "d32f09414d4f20d257a1d1411a0f27f24a8f235b1faf0fa81f449aaafb88de7e"
+    },
+    "eval/out/scenario-runs-parallel-v2/upcycled-denim-tokyo.json": {
+      "bytes": 477016,
+      "sha256": "c4a38884d1b20e79be666f67ccae5bcc0f95aff162ab522f19ff6e97df518bde"
+    },
+    "eval/out/scenario-summary-parallel-v2.json": {
+      "bytes": 33616,
+      "sha256": "7aa9f8f26898e9358fe3ad1012f063931e1ea082dd2d194cec085e63c4ef020e"
+    }
+  }
+}

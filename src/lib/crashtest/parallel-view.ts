@@ -62,6 +62,10 @@ export interface SummaryView {
   winnerTrack: string | null;
   verdict: string;
   stable: boolean;
+  /** The plan shown leads only on the evidence order (no stable blind verdict): for a person to confirm. */
+  provisional: boolean;
+  /** "Best complete plan" for a stable verdict, "Provisional plan" otherwise. */
+  headline: string;
   stability: string;
   hardConstraints: { passed: number; total: number };
   coverage: number;
@@ -174,17 +178,21 @@ export function parallelView(state: RunState): ParallelView | null {
   const hardTotal = state.brief.constraints.filter((c) => c.kind === "hard").length;
   const violations = p.verdict.evaluation?.hardConstraintViolations.length ?? 0;
   const v = p.verdict;
+  // Recordings from before parallel:v3 don't carry the flag; the same rule applies to them.
+  const provisional = v.provisional ?? (!!F && v.decidedBy === "evidence_order");
   const summary: SummaryView = {
     winner: F ? WINNER_TEXT[F.track] : "No recommendation",
     winnerTrack: F ? TRACK_LETTER[F.track] : null,
     verdict: VERDICT_TEXT[v.verdict],
     stable: v.stable,
+    provisional,
+    headline: provisional ? "Provisional plan" : "Best complete plan",
     stability: v.stable
       ? "Stable: the same verdict in both blind orders."
       : v.verdict === "unstable"
-        ? "Unstable: the blind verdict changed with the order the plans were shown in."
+        ? `Unstable: the blind verdict changed with the order the plans were shown in.${provisional ? " This plan only leads on the evidence order; a person should review it before relying on it." : ""}`
         : v.verdict === "tie"
-          ? "Tie: the blind judge found the plans level."
+          ? `Tie: the blind judge found the plans level.${provisional ? " This plan only leads on the evidence order; a person should choose." : ""}`
           : "No verdict: not enough evidence.",
     hardConstraints: { passed: F ? hardTotal - violations : 0, total: hardTotal },
     coverage: F ? (p.matrix.coverageByCandidate[F.candidateId] ?? 0) : 0,
@@ -277,7 +285,7 @@ export function toParallelMarkdown(state: RunState): string {
   const lines = [
     `# Crash test — ${state.marketLabel} (parallel)`,
     "",
-    `**Best complete plan:** ${s.winner} · ${s.stability}`,
+    `**${s.headline}:** ${s.winner} · ${s.stability}`,
     "",
     `Hard constraints passed: ${s.hardConstraints.passed} of ${s.hardConstraints.total} · Evidence coverage: ${Math.round(s.coverage * 100)}% · Supported ${s.counts.supported}, thin ${s.counts.thin}, unverified ${s.counts.unverified}, needs a person ${s.counts.needsHuman} · Qloo checks ${s.qlooChecks} · Model calls ${s.modelCalls}`,
     "",

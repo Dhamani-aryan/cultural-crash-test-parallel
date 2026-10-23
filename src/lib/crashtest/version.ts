@@ -27,10 +27,18 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
 /**
  * The parallel engine's own version, recorded beside RUN_VERSION. v2: the user's named acts and
  * brands get namesake protection in every track (v1 could test a user's "Divine" as the wrong one).
+ * v3: one evidence agent, independent of the user's unlocked choices, pools diverse Qloo candidates
+ * per slot, screens them against the brief-intent contract, tests complete plans by bounded beam
+ * search, challenges its own weakest choice, and an unstable verdict is shown as provisional.
  */
-export const PARALLEL_VERSION = "parallel:v2";
-/** The structured evidence-claim rules (evidence matrix). */
-export const EVIDENCE_RUBRIC_VERSION = "evidence:v1";
+export const PARALLEL_VERSION = "parallel:v3";
+/**
+ * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
+ * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
+ * structured role readings), weighted user preferences, and the v3 plan-comparison order, in
+ * which distinctiveness ranks plans only when the brief asks for it.
+ */
+export const EVIDENCE_RUBRIC_VERSION = "evidence:v2";
 /** The blind, order-rotated adjudication protocol. */
 export const ADJUDICATION_VERSION = "adjudicate:v1";
 

@@ -127,6 +127,7 @@ const REASON: Record<NonNullable<HybridAttempt["rejectionCode"]>, string> = {
   target_not_supported: "The targeted choice didn't become supported.",
   better_candidate_selected: "Another hybrid tested better this round.",
   duplicate: "It is the same plan as one already tested.",
+  repeated_plan: "It is a plan already tested.",
   locked: "It would change a choice the brief fixes.",
 };
 

@@ -13,6 +13,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { runCrashTest } from "../src/lib/crashtest/run";
 import { architectureFrom, runVersionFor } from "../src/lib/crashtest/version";
+import { isFrozen } from "./frozen";
+import { existingVersions, outputRefusal } from "./output-guard";
 import type { RunState } from "../src/lib/crashtest/types";
 import { createMemoryCache } from "../src/lib/cache/cache";
 import { getQlooEnv } from "../src/lib/env";
@@ -46,8 +48,11 @@ const ARCHITECTURE = architectureFrom();
 const RUN_VERSION = runVersionFor(ARCHITECTURE);
 const suffix = process.env.SCENARIO_TAG ?? (ARCHITECTURE === "parallel" ? "parallel" : "");
 const directory = `eval/out/scenario-runs${suffix ? `-${suffix}` : ""}`;
-mkdirSync(directory, { recursive: true });
 const summaryFile = `eval/out/scenario-summary${suffix ? `-${suffix}` : ""}.json`;
+// A frozen baseline is never written to, and one directory never mixes agent versions.
+const refusal = outputRefusal({ directory, summaryFile, runVersion: RUN_VERSION, frozen: isFrozen, existing: existingVersions(directory) });
+if (refusal) throw new Error(refusal);
+mkdirSync(directory, { recursive: true });
 type SavedSummary = { id: string; [key: string]: unknown };
 const previous = existsSync(summaryFile)
   ? (JSON.parse(readFileSync(summaryFile, "utf8")) as { summaries?: SavedSummary[] }).summaries ?? []
@@ -92,7 +97,21 @@ for (const row of selected) {
             winnerTrack: state.parallel.verdict.track,
             verdict: state.parallel.verdict.verdict,
             stable: state.parallel.verdict.stable,
+            provisional: state.parallel.verdict.provisional,
             usage: state.parallel.usage,
+            qlooRequests: state.qlooUsage?.requests ?? null,
+            cacheHits: state.qlooUsage?.cacheHits ?? null,
+            ...(state.parallel.agent
+              ? {
+                  agent: {
+                    stop: state.parallel.agent.stop,
+                    bundlesTested: state.parallel.agent.bundlesTested,
+                    challengesAccepted: state.parallel.agent.rounds.filter((r) => r.accepted).length,
+                    challengesRejected: state.parallel.agent.rounds.flatMap((r) => r.attempts.filter((a) => !a.accepted).map((a) => a.rejectionCode)),
+                  },
+                  config: state.parallel.config,
+                }
+              : {}),
           }
         : {}),
     };

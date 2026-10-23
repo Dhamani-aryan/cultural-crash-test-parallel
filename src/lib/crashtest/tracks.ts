@@ -220,8 +220,21 @@ export async function resolveLlmTrack(input: {
   brief: LaunchBrief;
   draft: Draft;
   anchors: EntityRef[];
+  /** The shared namesake countries for the user's named choices (see userChoiceCountries). */
+  countries?: Map<string, string>;
 }): Promise<TrackPlan> {
-  const { plan, notes } = await buildPlan({ ...input, origin: "agent_proposed" });
+  // A user's named act or brand the draft keeps is resolved with the same country every track
+  // uses, not the draft's own reading, so it is never tested as a different namesake here.
+  const shared = (name: string) => input.countries?.get(name.trim().toLowerCase());
+  const draft: Draft = {
+    ...input.draft,
+    countries: {
+      anchors: input.draft.countries?.anchors ?? [],
+      artist: shared(input.draft.artist) ?? input.draft.countries?.artist ?? "",
+      brand: shared(input.draft.brand) ?? input.draft.countries?.brand ?? "",
+    },
+  };
+  const { plan, notes } = await buildPlan({ ...input, draft, origin: "agent_proposed" });
   const user = new Set(input.brief.existingChoices.map((c) => c.slot));
   return {
     plan,

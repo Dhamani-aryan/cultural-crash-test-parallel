@@ -24,6 +24,7 @@
     "scenario:intake": "tsx --env-file-if-exists=.env.local eval/scenario-intake.ts",
     "scenario:run": "tsx --env-file-if-exists=.env.local eval/scenario-run.ts",
     "scenario:compare": "tsx --env-file-if-exists=.env.local eval/scenario-compare.ts",
+    "eval:fingerprint": "tsx eval/fingerprint.ts",
     "llm:login": "tsx --env-file-if-exists=.env.local scripts/chatgpt-login.ts",
     "llm:push-credential": "tsx --env-file-if-exists=.env.local scripts/push-chatgpt-credential.ts"
   },

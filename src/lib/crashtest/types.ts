@@ -125,7 +125,7 @@ export interface EvidenceRecord {
   evidenceId: string;
   iteration: number;
   purpose: string;
-  queryKind: "search" | "entities" | "tags" | "insights" | "locality" | "adjudication";
+  queryKind: "search" | "entities" | "tags" | "insights" | "locality" | "adjudication" | "review";
   /** Parallel runs: which track or stage collected it ("shared", "user", "llm", "agent", …). */
   scope?: string;
   /** Parameters as sent, minus anything secret. Enough to reproduce the query. */
@@ -266,7 +266,7 @@ export interface PlanChange {
 }
 
 /** A ranked list a candidate can come from. v1 uses one combined list; v2 retrieves each intention separately. */
-export type CandidateView = "combined" | "audience" | "local" | "coherence" | "proposals";
+export type CandidateView = "combined" | "audience" | "local" | "coherence" | "proposals" | "neighborhood";
 
 /** One candidate the agent considered for a choice: screened out, not picked, or re-tested. */
 export interface CandidateTrial {
@@ -563,10 +563,11 @@ export interface ChallengeFinding {
 export interface HybridAttempt {
   candidateId: string;
   parent: string;
-  kind: "union" | "swap" | "search";
+  /** "challenge": the agent's own substitution for its weakest choice (parallel:v3). */
+  kind: "union" | "swap" | "search" | "challenge";
   slot?: Slot;
   accepted: boolean;
-  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked" | "brief_fit_lost";
+  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked" | "brief_fit_lost" | "repeated_plan";
   reason: string;
   retest?: {
     supportedBefore: number;
@@ -588,6 +589,33 @@ export interface ImprovementRound {
   challenges: ChallengeFinding[];
   attempts: HybridAttempt[];
   accepted?: string;
+  /** The agent's challenge rounds: the failure it set out to fix, from recorded claims. */
+  hypothesis?: { slot: Slot; claimIds: string[]; statement: string };
+}
+
+/** One candidate the evidence agent pooled for a slot, with where it came from and how each screen read it. */
+export interface PoolRecord {
+  slot: Slot;
+  name: string;
+  entityId?: string;
+  source: "qloo" | "user";
+  /** Rank in each Qloo view it appeared in. */
+  views: Partial<Record<CandidateView, number>>;
+  lanes: ("affinity" | "locality" | "brief_fit")[];
+  screens: { role: string; locality: string; brief: string; distinct: string; central: string; notes: string[] };
+  /** "pool" (composed into bundles), "reserve" (kept for the challenge loop) or why it was dropped. */
+  outcome: string;
+  evidenceIds: string[];
+}
+
+/** What the single evidence agent did (parallel:v3). */
+export interface AgentRecord {
+  contract: import("./intent").IntentContract;
+  beamWidth: number;
+  pools: PoolRecord[];
+  bundlesTested: number;
+  rounds: ImprovementRound[];
+  stop: "no_weakness" | "no_improvement" | "no_alternative" | "repeated_plan" | "round_limit" | "budget";
 }
 
 export interface FinalVerdict {
@@ -598,6 +626,8 @@ export interface FinalVerdict {
   stable: boolean;
   /** "adjudication": the blind judge decided. "evidence_order": no stable verdict, so the deterministic order is shown and flagged for a person. */
   decidedBy: "adjudication" | "evidence_order" | "none";
+  /** No stable blind verdict: the plan shown leads only on the evidence order and is for a person to confirm, not a winner. */
+  provisional: boolean;
   plan: CulturalPlan | null;
   open: OpenSlot[];
   evaluation: PlanEvaluation | null;
@@ -633,4 +663,22 @@ export interface ParallelResult {
   final: AdjudicationResult;
   verdict: FinalVerdict;
   usage: Record<UsageScope, TrackUsage>;
+  /** parallel:v3: the single evidence agent's pools, bundles and challenge rounds. */
+  agent?: AgentRecord;
+  /** parallel:v3: what fixed the run's behaviour, frozen with it. */
+  config?: RunConfig;
+}
+
+export interface RunConfig {
+  model: string;
+  ranking: string;
+  contractVersion: string;
+  screensVersion: string;
+  beamWidth: number;
+  challengeRounds: number;
+  maxQlooCalls: number;
+  /** SHA-256 of the system prompts the run used, so a prompt change shows. */
+  promptsFingerprint: string;
+  /** The provider doesn't expose temperature or a seed here; outputs are not deterministic. */
+  sampling: string;
 }

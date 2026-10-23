@@ -1,7 +1,9 @@
 import { nameKey } from "@/lib/engine/stats";
 import type { QlooEntity } from "@/lib/qloo";
 import { unverifiableRules } from "./constraints";
+import type { IntentContract } from "./intent";
 import { fitsBrief, isFoodAndDrink, ruledOut, stem, venueFormat } from "./repair";
+import { avoidedMatch, centralityFlag, hostTier, mainstreamFlag, neighborhoodFit, type Centroid, type RoleCheck } from "./screens";
 import {
   SLOTS,
   SLOT_LABEL,
@@ -50,9 +52,16 @@ export const RULES = {
   "R-direction-attributes": "The creative direction should carry the brand's stated attributes.",
   "R-no-duplicate": "No two choices may be the same entity.",
   "R-non-circular": "An audience anchor used as a choice is tested against the other anchors only.",
-  "R-mainstream": "A top-0.5% mainstream default is noted as less distinctive: a differentiator, never a failure.",
+  "R-mainstream": "A top-0.5% mainstream default is noted for a person; it ranks plans only when the brief asks for distinctiveness.",
   "R-coverage": "How much of the plan Qloo could measure: confidence, kept apart from quality.",
   "R-anchor-hypothesis": "Model-suggested audience anchors are hypotheses a person should confirm.",
+  "R-user-considered": "A choice the user was only considering is a weaker statement of preference than a named choice.",
+  "R-host-tier": "A venue should be a kind of place the brief's event format calls for, not merely one that can host something.",
+  "R-neighborhood": "A venue near the neighbourhood the brief names fits it; far from it doesn't. Without coordinates it is unknown.",
+  "R-distinct-requested": "When the brief asks for independent, local or non-generic choices, a top-0.5% mainstream default counts against it.",
+  "R-product-central": "A headline-scale act or an arena-scale room can make the product an afterthought.",
+  "R-avoided-quality": "A choice Qloo describes with something the brief says to avoid counts against it.",
+  "R-role-check": "The agent's model read the candidate's Qloo facts against the job in the brief: a structured screen, not Qloo evidence.",
 } as const;
 export type RuleId = keyof typeof RULES;
 
@@ -64,7 +73,16 @@ export interface MatrixContext {
   anchorSource: ParallelResult["anchorSource"];
   /** Ledger records that resolved an entity, to cite for entity correctness. */
   resolutionEvidence: (entityId: string) => string[];
+  /** evidence:v2: the brief-intent contract behind the brief-aware screens. */
+  contract?: IntentContract;
+  /** evidence:v2: structured role readings, keyed by entity ID (see roleKey). */
+  roleChecks?: Map<string, RoleCheck>;
+  /** evidence:v2: where the named neighbourhood's venues are, when Qloo returned coordinates. */
+  neighborhood?: Centroid | null;
 }
+
+/** The key a role reading is stored under: the entity, else the slot and label. */
+export const roleKey = (c: Pick<Component, "slot" | "label" | "entity">) => c.entity?.id ?? `${c.slot}:${c.label.toLowerCase()}`;
 
 const SOURCE_OF: Record<"audience" | "local" | "coherence", EvidenceSource> = {
   audience: "qloo_affinity",
@@ -142,15 +160,19 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
     const locked = brief.constraints.some((k) => k.kind === "hard" && k.lockSlot === choice.slot);
     const kept = comp?.origin === "user_provided";
     if (locked && !kept) hard.push(`${SLOT_LABEL[choice.slot]}: the brief fixes "${choice.name}", and this plan doesn't keep it.`);
+    // evidence:v2: how firmly the brief asks for it (locked, named, or only considered).
+    const considered = !locked && ctx.contract?.choices.find((x) => x.slot === choice.slot)?.strength === "considered";
     add(
       choice.slot,
       "constraint",
       "user-intent",
-      kept ? `Keeps "${choice.name}", which the brief names${locked ? " and fixes" : ""}.` : `Replaces "${choice.name}", which the brief names.`,
+      kept
+        ? `Keeps "${choice.name}", which the brief ${locked ? "names and fixes" : considered ? "was considering" : "names"}.`
+        : `Replaces "${choice.name}", which the brief ${considered ? "was only considering" : "names"}.`,
       kept ? "supports" : "contradicts",
       "user",
-      locked ? "strong" : "moderate",
-      { ruleId: locked ? "R-lock" : "R-user-choice" },
+      locked ? "strong" : considered ? "thin" : "moderate",
+      { ruleId: locked ? "R-lock" : considered ? "R-user-considered" : "R-user-choice" },
     );
   }
   const violations = c.evaluation?.hardConstraintViolations ?? [];
@@ -250,6 +272,72 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
         { ruleId: "R-venue-format" },
       );
     }
+    // evidence:v2: brief-aware screens, the same for every track's plans.
+    const k = ctx.contract;
+    if (k && fact) {
+      if (slot === "event_place") {
+        const tier = hostTier(fact.tags.map((t) => t.id), k, food);
+        if (tier !== "unsuitable")
+          add(
+            slot,
+            "role_fit",
+            "host-tier",
+            tier === "preferred"
+              ? `${comp.label} is the kind of place the brief's format calls for (${k.formats.map((f) => f.phrase).slice(0, 3).join(", ") || "an event"}).`
+              : tier === "possible"
+                ? `${comp.label} can host an event, but isn't the kind of place the brief's format calls for.`
+                : `Qloo doesn't say what kind of place ${comp.label} is.`,
+            tier === "preferred" ? "supports" : "unknown",
+            "logical_rubric",
+            tier === "preferred" ? "moderate" : "thin",
+            { ruleId: "R-host-tier" },
+          );
+        const hood = k.neighborhoods[0];
+        if (hood) {
+          const n = neighborhoodFit(fact, ctx.neighborhood ?? null);
+          add(
+            slot,
+            "local",
+            "neighborhood",
+            n.fit === "near"
+              ? `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, which the brief names ("${hood.phrase}").`
+              : n.fit === "far"
+                ? `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, which the brief names ("${hood.phrase}").`
+                : `Whether ${comp.label} is in ${hood.value} can't be told from Qloo's coordinates.`,
+            n.fit === "near" ? "supports" : n.fit === "far" ? "contradicts" : "unknown",
+            "qloo_locality",
+            n.fit === "unknown" ? "unknown" : "moderate",
+            { ruleId: "R-neighborhood", evidenceIds: ctx.neighborhood ? [ctx.neighborhood.evidenceId] : [] },
+          );
+        }
+      }
+      const central = centralityFlag(slot, fact, k);
+      if (central) add(slot, "role_fit", "central", `${comp.label}: ${central}.`, "contradicts", "logical_rubric", "thin", { ruleId: "R-product-central" });
+      const avoided = avoidedMatch(fact, k);
+      if (avoided)
+        add(slot, "role_fit", "avoided", `Qloo describes ${comp.label} with "${avoided}", which the brief says to avoid ("${k.negative.find((n) => n.value.toLowerCase().includes(avoided))?.phrase ?? avoided}").`, "contradicts", "logical_rubric", "thin", {
+          ruleId: "R-avoided-quality",
+        });
+    }
+    const role = ctx.roleChecks?.get(roleKey(comp));
+    if (role)
+      add(
+        slot,
+        "role_fit",
+        "role-check",
+        `${comp.label}: ${role.reason}`,
+        role.verdict === "fits" ? "supports" : role.verdict === "wrong" ? "contradicts" : "unknown",
+        "logical_rubric",
+        role.verdict === "doubtful" ? "thin" : "moderate",
+        { ruleId: "R-role-check", evidenceIds: [role.evidenceId], limitations: ["A model's reading of the facts shown, not Qloo evidence."] },
+      );
+    if (role && !role.central && !centralityFlag(slot, fact, k ?? ({ formats: [] } as unknown as IntentContract)))
+      add(slot, "role_fit", "role-central", `${comp.label} may overshadow the product (model reading).`, "contradicts", "logical_rubric", "thin", {
+        ruleId: "R-role-check",
+        evidenceIds: [role.evidenceId],
+        limitations: ["A model's reading of the facts shown, not Qloo evidence."],
+      });
+
     if (slot === "event_place")
       add(slot, "feasibility", "unverified", `Capacity, availability and willingness of ${comp.label} to host are unverified.`, "unknown", "logical_rubric", "unknown", {
         ruleId: "R-feasibility-unverified",
@@ -322,17 +410,21 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
         );
       }
     }
-    if (comp.entity && comp.entity.popularity !== null)
+    if (comp.entity && comp.entity.popularity !== null) {
+      const mainstream = comp.entity.popularity >= 0.995;
+      // evidence:v2: a mainstream default counts against a choice only when the brief asks for distinctiveness.
+      const requested = ctx.contract?.wantsDistinctive ?? false;
       add(
         slot,
         "distinctiveness",
         "mainstream",
-        comp.entity.popularity >= 0.995 ? `${comp.label} is a top-0.5% mainstream name in Qloo.` : `${comp.label} isn't a top-0.5% mainstream default.`,
-        comp.entity.popularity >= 0.995 ? "unknown" : "supports",
+        mainstream ? `${comp.label} is a top-0.5% mainstream name in Qloo${requested ? ", and the brief asks for independent or non-generic choices" : ""}.` : `${comp.label} isn't a top-0.5% mainstream default.`,
+        mainstream ? (requested && mainstreamFlag(comp.entity.popularity, ctx.contract!) ? "contradicts" : "unknown") : "supports",
         "entity_metadata",
         "thin",
-        { ruleId: "R-mainstream" },
+        { ruleId: requested ? "R-distinct-requested" : "R-mainstream" },
       );
+    }
 
     // Layer 6: what a person should make of it.
     if (!states[slot])
@@ -395,23 +487,35 @@ const net = (claims: EvidenceClaim[], dims: EvidenceDimension[]) =>
     .filter((c) => dims.includes(c.dimension))
     .reduce((s, c) => s + (c.stance === "supports" ? WEIGHT[c.strength] : c.stance === "contradicts" ? -Math.max(WEIGHT[c.strength], 0.5) : 0), 0);
 
+/** How much keeping (or replacing) a user's unlocked choice weighs in brief fit: named 0.5, only considered 0.25. */
+const PREFERENCE: Partial<Record<RuleId, number>> = { "R-user-choice": 0.5, "R-user-considered": 0.25 };
+
 /**
- * The decision policy as a vector, compared left to right: hard failures, then user intent kept,
- * then completeness, then audience and role fit, locality and coherence, feasibility, and
- * distinctiveness last. Coverage (confidence) is deliberately not in it: a thinly evidenced plan
- * is uncertain, not worse.
+ * The decision policy (evidence:v2) as a vector, compared left to right:
+ *   1. hard failures; 2. explicit locks kept; 3. completeness; 4. role and brief fit (with the
+ *   user's unlocked choices as weighted preferences); 5. audience support, counted per choice so
+ *   one exceptional affinity can't make up for weak ones; 6. locality and neighbourhood;
+ *   7. cross-component coherence; 8. distinctiveness; 9. evidence coverage, as confidence only.
  */
 export function evidenceVector(m: EvidenceMatrix, candidateId: string): number[] {
   const mine = m.claims.filter((c) => c.candidateId === candidateId);
   const intent = mine.filter((c) => c.claimId.endsWith("/user-intent"));
+  const locks = intent.filter((c) => c.ruleId === "R-lock");
+  const preference = intent.reduce((s, c) => s + (PREFERENCE[c.ruleId as RuleId] ?? 0) * (c.stance === "supports" ? 1 : c.stance === "contradicts" ? -1 : 0), 0);
+  const audience = mine.filter((c) => c.dimension === "audience" && c.slot);
+  const choices = new Set(mine.filter((c) => c.dimension === "entity" && c.slot).map((c) => c.slot));
+  const supportedAudience = new Set(audience.filter((c) => c.stance === "supports").map((c) => c.slot));
   return [
     -(m.hardFailures[candidateId]?.length ?? 0),
-    intent.filter((c) => c.stance === "supports").length - intent.filter((c) => c.stance === "contradicts").length,
+    locks.filter((c) => c.stance === "supports").length - locks.filter((c) => c.stance === "contradicts").length,
     m.completenessByCandidate[candidateId] ?? 0,
-    net(mine, ["audience", "role_fit"]),
-    net(mine, ["local", "coherence"]),
-    net(mine, ["feasibility", "entity"]),
-    net(mine, ["distinctiveness", "diversity"]),
+    net(mine, ["role_fit"]) + preference,
+    -(choices.size - supportedAudience.size),
+    net(mine, ["local"]),
+    net(mine, ["coherence"]),
+    // Distinctiveness ranks plans only when the brief asks for it (R-distinct-requested).
+    net(mine.filter((c) => c.ruleId === "R-distinct-requested"), ["distinctiveness", "diversity"]),
+    m.coverageByCandidate[candidateId] ?? 0,
   ];
 }
 

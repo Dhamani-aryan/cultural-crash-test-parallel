@@ -47,7 +47,7 @@ export interface RunOptions {
   signal?: AbortSignal;
   runId?: string;
   /** Override the depth's limits (tests, evaluation). */
-  limits?: { maxRepairs?: number; maxQlooCalls?: number };
+  limits?: { maxRepairs?: number; maxQlooCalls?: number; /** Parallel runs: the agent's beam width. */ beamWidth?: number };
   /** Recorded in the run's provenance. */
   runVersion?: string;
   /** Candidate retrieval and ranking; defaults to RECOMMENDATION_RANKING, then v1. */
