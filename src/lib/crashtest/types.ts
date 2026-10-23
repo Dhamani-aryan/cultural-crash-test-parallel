@@ -336,6 +336,15 @@ export interface ActionRecord {
   why: string;
 }
 
+/** What a clarification session hands the run: the frozen brief's fingerprint and what it assumed. */
+export interface RunClarification {
+  sessionId: string;
+  fingerprint: string;
+  assumptions: string[];
+  /** Material items left open (a delegated conflict, an unresolved identity): the result is provisional. */
+  provisional: string[];
+}
+
 export interface RunState {
   runId: string;
   brief: LaunchBrief;
@@ -369,6 +378,8 @@ export interface RunState {
   architecture?: Architecture;
   /** Parallel runs only: the three tracks, the evidence matrix, adjudication and the final verdict. */
   parallel?: ParallelResult;
+  /** The clarification session the brief came out of, when there was one. */
+  clarification?: RunClarification & { fingerprintMatches: boolean };
   startedAt: string;
   finishedAt?: string;
 }

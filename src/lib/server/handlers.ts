@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { answerSession, SessionError, startSession, type ClarifyEvent, type Session } from "@/lib/clarify/session";
 import { cacheKey, type Cache } from "@/lib/cache/cache";
-import { runCrashTest } from "@/lib/crashtest/run";
+import { runCrashTest, type RunOptions } from "@/lib/crashtest/run";
 import {
   ADJUDICATION_VERSION,
   EVIDENCE_RUBRIC_VERSION,
@@ -26,19 +28,40 @@ export interface Deps {
   qlooStats?: { hits: number; requests: number };
 }
 
+const AnswerInputSchema = z.object({
+  questionId: z.string().max(200).optional(),
+  selectedOptionIds: z.array(z.string().max(200)).max(8).optional(),
+  customText: z.string().trim().max(500).optional(),
+  delegated: z.boolean().optional(),
+  /** A normal chat message, read against the open question. */
+  message: z.string().trim().max(2000).optional(),
+});
+
 export const CrashTestRequestSchema = z.union([
   z.object({
     brief: LaunchBriefSchema,
     /** Ignore a recorded run of the same brief and run live. */
     fresh: z.boolean().default(false),
+    /** Run the clarification gate first (P1; the interface opts in). */
+    clarify: z.boolean().default(false),
   }),
   z.object({
     /** A confirmed intake. Re-validated here: the client's readyToRun is never trusted. */
     intake: IntakeStateSchema,
     depth: z.enum(["quick", "thorough"]).default("thorough"),
     fresh: z.boolean().default(false),
+    clarify: z.boolean().default(false),
+  }),
+  z.object({
+    /** Answers to an open clarification session; on "ready" the same stream runs the comparison. */
+    clarification: z.object({ sessionId: z.string().uuid(), answers: z.array(AnswerInputSchema).min(1).max(3) }),
+    fresh: z.boolean().default(false),
   }),
 ]);
+
+/** Clarification sessions: non-secret structured state, kept server-side by id. */
+const SESSION_TTL = 2 * 60 * 60;
+const sessionKey = (id: string) => `clarify:session:${id}`;
 
 export { RUN_VERSION };
 const RECORDING_TTL = 14 * 24 * 60 * 60;
@@ -135,6 +158,7 @@ export async function handleCrashTest(
   } catch (err) {
     return errorResponse(err);
   }
+  if ("clarification" in body) return handleClarificationAnswer(req, body, deps, cache, beforeLive);
   let input: LaunchBriefInput;
   if ("brief" in body) {
     input = body.brief;
@@ -152,11 +176,26 @@ export async function handleCrashTest(
     input = LaunchBriefSchema.parse(toLaunchBrief(intake, body.depth));
   }
   if (!marketById(input.marketId)) return jsonError(400, "unsupported_city");
+  if (body.clarify) return handleClarificationStart(req, input, body.fresh, deps, cache, beforeLive);
+  const run = await runEvents(req, input, body.fresh, deps, cache, beforeLive);
+  return run instanceof Response ? run : sseResponse(run, req.signal);
+}
+
+/** The existing run path (a recording replay, or a live run behind the limiter), as a stream. */
+async function runEvents(
+  req: Request,
+  input: LaunchBriefInput,
+  fresh: boolean,
+  deps: () => Deps,
+  cache?: () => Cache,
+  beforeLive?: () => Promise<Response | null>,
+  extra: { clarification?: RunOptions["clarification"]; runId?: string } = {},
+): Promise<Response | AsyncIterable<RunEvent>> {
   const store = cache?.();
   const key = runKey(input);
-  if (store && !body.fresh) {
+  if (store && !fresh) {
     const recording = await store.get<Recording>(key);
-    if (recording) return sseResponse(replay(recording), req.signal);
+    if (recording) return replay(recording);
   }
   const refused = await beforeLive?.();
   if (refused) return refused;
@@ -167,10 +206,118 @@ export async function handleCrashTest(
     return errorResponse(err);
   }
   const live = eventStream<RunEvent>(
-    (emit) => runCrashTest(resolved, input, { emit, signal: req.signal, runVersion: runVersionFor(architectureFrom()) }),
+    (emit) => runCrashTest(resolved, input, { emit, signal: req.signal, runVersion: runVersionFor(architectureFrom()), ...extra }),
     (message) => ({ type: "error", message }),
   );
-  return sseResponse(store ? record(live, store, key) : live, req.signal);
+  return store ? record(live, store, key) : live;
+}
+
+type StreamEvent = RunEvent | ClarifyEvent;
+
+/**
+ * Clarification events, then, when the session is ready, the existing run in the same stream:
+ * the client never has to start it. A refusal by the limiter becomes an error event here, since
+ * the stream has already begun.
+ */
+async function* clarifyThenRun(
+  req: Request,
+  session: Session,
+  events: ClarifyEvent[],
+  store: Cache,
+  fresh: boolean,
+  deps: () => Deps,
+  cache?: () => Cache,
+  beforeLive?: () => Promise<Response | null>,
+): AsyncGenerator<StreamEvent> {
+  yield* events;
+  if (session.state !== "ready" || !session.clarifiedBrief || !session.fingerprint) return;
+  const runId = randomUUID();
+  session.state = "running";
+  await store.set(sessionKey(session.sessionId), session, SESSION_TTL);
+  yield { type: "run_started", runId, sessionId: session.sessionId };
+  const run = await runEvents(req, LaunchBriefSchema.parse(session.clarifiedBrief), fresh, deps, cache, beforeLive, {
+    runId,
+    clarification: { sessionId: session.sessionId, fingerprint: session.fingerprint, assumptions: session.assumptions, provisional: session.provisional },
+  });
+  if (run instanceof Response) {
+    const body = await run.json().catch(() => null);
+    session.state = "ready";
+    await store.set(sessionKey(session.sessionId), session, SESSION_TTL);
+    yield { type: "error", message: run.status === 429 ? "Live runs are rate-limited on this demo. Try again in a few minutes." : (body?.error ?? `The run couldn't start (${run.status}).`) };
+    return;
+  }
+  for await (const e of run) {
+    if (e.type === "done") {
+      session.state = "complete";
+      await store.set(sessionKey(session.sessionId), session, SESSION_TTL);
+    }
+    yield e;
+  }
+}
+
+async function handleClarificationStart(
+  req: Request,
+  input: LaunchBriefInput,
+  fresh: boolean,
+  deps: () => Deps,
+  cache?: () => Cache,
+  beforeLive?: () => Promise<Response | null>,
+): Promise<Response> {
+  const store = cache?.();
+  if (!store) return jsonError(500, "clarification_unavailable", ["Clarification needs the session cache."]);
+  let resolved: Deps;
+  try {
+    resolved = deps();
+  } catch (err) {
+    return errorResponse(err);
+  }
+  let started: Awaited<ReturnType<typeof startSession>>;
+  try {
+    started = await startSession(input, { llm: resolved.llm, qloo: resolved.qloo });
+  } catch (err) {
+    return err instanceof SessionError ? jsonError(400, err.code, [err.message]) : errorResponse(err);
+  }
+  await store.set(sessionKey(started.session.sessionId), started.session, SESSION_TTL);
+  // The same resolved clients serve the run, so one request's counts stay together.
+  return sseResponse(clarifyThenRun(req, started.session, started.events, store, fresh, () => resolved, cache, beforeLive), req.signal);
+}
+
+async function handleClarificationAnswer(
+  req: Request,
+  body: Extract<z.infer<typeof CrashTestRequestSchema>, { clarification: unknown }>,
+  deps: () => Deps,
+  cache?: () => Cache,
+  beforeLive?: () => Promise<Response | null>,
+): Promise<Response> {
+  const store = cache?.();
+  if (!store) return jsonError(500, "clarification_unavailable", ["Clarification needs the session cache."]);
+  const session = await store.get<Session>(sessionKey(body.clarification.sessionId));
+  if (!session) return jsonError(404, "unknown_session", ["This clarification session doesn't exist or has expired. Start the run again."]);
+  let resolved: Deps;
+  try {
+    resolved = deps();
+  } catch (err) {
+    return errorResponse(err);
+  }
+  let out: Awaited<ReturnType<typeof answerSession>>;
+  try {
+    out = await answerSession(session, body.clarification.answers, { llm: resolved.llm, qloo: resolved.qloo });
+  } catch (err) {
+    if (err instanceof SessionError) return jsonError(err.code === "invalid_state" ? 409 : 400, err.code, [err.message]);
+    return errorResponse(err);
+  }
+  if (out.replayed && (session.state === "running" || session.state === "complete")) {
+    // A repeated submission never starts a second run: the stored events, then the recording if there is one.
+    const recording = session.clarifiedBrief ? await store.get<Recording>(runKey(LaunchBriefSchema.parse(session.clarifiedBrief))) : null;
+    async function* again(): AsyncGenerator<StreamEvent> {
+      yield* out.events;
+      if (recording) yield* replay(recording);
+      else yield { type: "assistant_message", text: "This run has already started; its result appears where it was started." };
+    }
+    return sseResponse(again(), req.signal);
+  }
+  await store.set(sessionKey(session.sessionId), out.session, SESSION_TTL);
+  return sseResponse(clarifyThenRun(req, out.session, out.events, store, body.fresh, () => resolved, cache, beforeLive), req.signal);
 }
 
 /**

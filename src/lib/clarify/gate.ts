@@ -180,8 +180,10 @@ export async function runGate(input: GateInput): Promise<GateResult> {
   const assumptions: string[] = generator === "failed" ? ["The clarification model was unavailable; the run proceeds on what the brief says and the assumptions below."] : [];
   const provisional: string[] = [];
   const deferred: string[] = [];
+  const assumedPatches: BriefPatch[] = [];
   const assume = (u: Uncertainty, why: string, outcome: "assumed" | "dropped" = "assumed") => {
     assumptions.push(u.safeDefault.assumption);
+    assumedPatches.push(...u.safeDefault.patches);
     if (u.safeDefault.provisional) provisional.push(u.safeDefault.assumption);
     audit.push({ id: u.id, reason: u.reason, origin: u.origin, outcome, why });
   };
@@ -214,6 +216,7 @@ export async function runGate(input: GateInput): Promise<GateResult> {
     questions: toAsk.map(toQuestion),
     resolutions: found.resolutions,
     assumptions,
+    assumedPatches,
     deferred,
     provisional,
     audit,

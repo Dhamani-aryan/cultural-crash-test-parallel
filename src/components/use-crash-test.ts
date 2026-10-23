@@ -71,6 +71,9 @@ export function reduce(v: View, e: RunEvent): View {
       };
     case "error":
       return { ...v, phase: "error", error: e.message };
+    default:
+      // Clarification events (P1) are rendered by the chat interface (P2); the run view ignores them.
+      return v;
   }
 }
 

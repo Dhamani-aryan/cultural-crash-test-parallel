@@ -11,6 +11,7 @@ import { QueryRequestSchema, parseQuery, type QueryRequest } from "./query";
 import { applyRepair, repairDirection, repairEntity, type DraftTrial, type RepairProposal } from "./repair";
 import { writeVerdict } from "./report";
 import { runParallelCrashTest } from "./parallel-run";
+import { freezeBrief } from "./tracks";
 import { architectureFrom, rankingFrom, type Architecture, type Ranking } from "./version";
 import {
   DEPTHS,
@@ -19,6 +20,7 @@ import {
   type CandidateTrial,
   type CulturalPlan,
   type EntityRef,
+  type RunClarification,
   type LaunchBriefInput,
   type PlanChange,
   type PlanEvaluation,
@@ -63,6 +65,8 @@ export interface RunOptions {
    * them (frozen evaluation), so repeated runs and different versions use the same audience.
    */
   anchors?: { anchors: EntityRef[]; source: "user" | "model_hypothesis"; from: string };
+  /** The clarification session the brief came out of: its assumptions and open items reach the result. */
+  clarification?: RunClarification;
   /** Sequential (the control) or parallel three-track; defaults to RECOMMENDATION_ARCHITECTURE, then sequential. */
   architecture?: Architecture;
   /** Parallel runs: the n-th blind ID (tests make them deterministic; live runs use random ones). */
@@ -74,11 +78,41 @@ export const STALL_ROUNDS = 2;
 
 class Cancelled extends Error {}
 
+/**
+ * Record the clarification on a finished run: its assumptions, the items left open (which make the
+ * result provisional, with the specific check at the top), and whether the brief every track froze
+ * is the clarified brief the session fingerprinted. Idempotent.
+ */
+export function attachClarification(state: RunState, c: RunClarification): RunState {
+  if (state.clarification) return state;
+  state.clarification = { ...c, fingerprintMatches: freezeBrief(state.brief).fingerprint === c.fingerprint };
+  for (const a of c.assumptions) {
+    const line = `Clarification: ${a}`;
+    if (!state.assumptions.includes(line)) state.assumptions.push(line);
+  }
+  for (const p of c.provisional) if (!state.unresolvedQuestions.includes(p)) state.unresolvedQuestions.unshift(p);
+  const v = state.parallel?.verdict;
+  if (v && c.provisional.length) {
+    // An answer the user delegated, or an identity left unresolved, could change the plan.
+    v.provisional = !!v.candidateId;
+    v.humanChecks = [...c.provisional.filter((p) => !v.humanChecks.includes(p)), ...v.humanChecks];
+  }
+  return state;
+}
+
 export async function runCrashTest(
   deps: RunDeps,
   input: LaunchBriefInput | QueryRequest,
   opts: RunOptions = {},
 ): Promise<RunState> {
+  if (opts.clarification) {
+    // One place attaches the clarification to the finished state, for either architecture.
+    const c = opts.clarification;
+    const emit = opts.emit;
+    opts = { ...opts, emit: (e) => (e.type === "done" && attachClarification(e.state, c), emit?.(e)) };
+    const state = await runCrashTest(deps, input, { ...opts, clarification: undefined });
+    return attachClarification(state, c);
+  }
   if (architectureFrom(opts.architecture) === "parallel") return runParallelCrashTest(deps, input, opts);
   const emit = opts.emit ?? (() => {});
   const market = marketById(input.marketId);

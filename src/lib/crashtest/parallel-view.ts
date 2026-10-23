@@ -194,6 +194,8 @@ export function parallelView(state: RunState): ParallelView | null {
         : v.verdict === "tie"
           ? `Tie: the blind judge found the plans level.${provisional ? " This plan only leads on the evidence order; a person should choose." : ""}`
           : "No verdict: not enough evidence.",
+    // A clarification left open (a delegated conflict, an unresolved identity) names the one check that could change the plan.
+    ...(state.clarification?.provisional.length && F ? { stability: `Provisional: ${state.clarification.provisional[0]}` } : {}),
     hardConstraints: { passed: F ? hardTotal - violations : 0, total: hardTotal },
     coverage: F ? (p.matrix.coverageByCandidate[F.candidateId] ?? 0) : 0,
     counts: {

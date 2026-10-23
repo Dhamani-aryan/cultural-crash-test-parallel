@@ -144,6 +144,8 @@ export interface GateResult {
   resolutions: Resolution[];
   /** Assumptions applied now (budget exhausted, or not material enough to ask). */
   assumptions: string[];
+  /** The patches those assumptions stand for, applied to the brief with them. */
+  assumedPatches: BriefPatch[];
   /** Material uncertainties left for the next turn, within the budget. */
   deferred: string[];
   /** Material uncertainties that stay open: the result must be marked provisional. */

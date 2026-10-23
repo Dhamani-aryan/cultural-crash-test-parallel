@@ -166,6 +166,8 @@ export function worldLlm(
     anchors?: { name: string; country: string }[];
     /** The country the model gives for every act or brand the user named. */
     choiceCountry?: string;
+    /** The clarification gate's model proposals (default: none), or a failed call. */
+    clarify?: unknown;
     /** The structured role check's reading of a candidate, by label (default: fits, keeps the product central). */
     roles?: Record<string, { verdict: "fits" | "doubtful" | "wrong"; central?: boolean; reason?: string }>;
   } = {},
@@ -243,6 +245,10 @@ export function worldLlm(
               return { id, verdict: r?.verdict ?? "fits", central: r?.central ?? true, reason: r?.reason ?? (r?.verdict === "wrong" ? `${label} can't do this job.` : `${label} can do this job.`) };
             }),
         });
+      }
+      if (system.startsWith("You review a product-launch brief")) {
+        if (over.clarify === "fail") throw new Error("clarification model down");
+        return reply(over.clarify ?? { proposals: [] });
       }
       if (system.startsWith("Write a 2-3 sentence")) return reply("Verdict from the recorded facts.");
       throw new Error(`no scripted reply for: ${system.slice(0, 50)}`);
