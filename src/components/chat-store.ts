@@ -1,6 +1,7 @@
 "use client";
 
 import type { RunState } from "@/lib/crashtest/types";
+import type { ClarifyItem } from "./clarify-view";
 import type { IntakeState } from "@/lib/intake/types";
 import { marketById } from "@/lib/markets";
 
@@ -17,6 +18,8 @@ export interface SavedChat {
   intake: IntakeState;
   /** The finished run, when there was one. Dropped first if storage runs out. */
   result: RunState | null;
+  /** The clarification exchange before the run, when there was one. */
+  clarification?: ClarifyItem[];
 }
 
 const KEY = "cct:chats:v1";

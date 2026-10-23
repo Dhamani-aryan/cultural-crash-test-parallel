@@ -125,6 +125,7 @@ describe("clarification through the run endpoint", () => {
     const state = done(ran);
     expect(first(ran, "ready")!.provisional.join(" ")).toMatch(/Big Tex/);
     expect(state.parallel!.verdict).toMatchObject({ provisional: true });
+    expect(state.parallel!.verdict.assumptionsIntroduced.join(" ")).toMatch(/Big Tex stays unresolved/);
     expect(state.parallel!.verdict.humanChecks[0]).toMatch(/Big Tex stays unresolved/);
     const view = parallelView(state)!;
     expect(view.summary).toMatchObject({ headline: "Provisional plan" });

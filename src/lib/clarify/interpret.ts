@@ -38,7 +38,11 @@ export function interpretText(q: ClarificationQuestion, text: string): Interpret
   const asked = new Set(words(q.prompt));
   const scored = q.options
     .map((o) => {
-      const own = [...new Set(words(o.label))].filter((w) => !asked.has(w));
+      const label = [...new Set(words(o.label))];
+      // When every word of an option is also in the question, what sets it apart from the other options decides.
+      const others = new Set(q.options.filter((x) => x !== o).flatMap((x) => words(x.label)));
+      const fresh = label.filter((w) => !asked.has(w));
+      const own = fresh.length ? fresh : label.filter((w) => !others.has(w));
       const hit = own.filter((w) => said.has(w)).length;
       return { o, score: own.length ? hit / own.length : 0, hit };
     })

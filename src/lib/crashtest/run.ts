@@ -92,6 +92,8 @@ export function attachClarification(state: RunState, c: RunClarification): RunSt
   }
   for (const p of c.provisional) if (!state.unresolvedQuestions.includes(p)) state.unresolvedQuestions.unshift(p);
   const v = state.parallel?.verdict;
+  // The verdict's own list of assumptions is what the comparison shows; delegated answers belong there too.
+  if (v) for (const a of c.assumptions) if (!v.assumptionsIntroduced.includes(a)) v.assumptionsIntroduced.push(a);
   if (v && c.provisional.length) {
     // An answer the user delegated, or an identity left unresolved, could change the plan.
     v.provisional = !!v.candidateId;

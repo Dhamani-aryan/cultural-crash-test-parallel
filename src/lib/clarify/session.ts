@@ -193,10 +193,20 @@ function ready(session: Session): ClarifyEvent {
   return { type: "ready", sessionId: session.sessionId, clarifiedBrief: session.brief, fingerprint: session.fingerprint, assumptions: session.assumptions, provisional: session.provisional };
 }
 
-/** The opening line when nothing needs asking: what the brief already settles, briefly. */
+/** The opening line when nothing needs asking: what the brief already settles, in plain words. */
 function understood(gate: GateResult): string {
-  const said = gate.resolutions.map((r) => r.because).slice(0, 3);
-  return said.length ? `I have enough to work with. ${said.join(" ")}` : "I have enough to work with.";
+  const said = gate.resolutions
+    .flatMap((r) => r.patches)
+    .flatMap((p) => {
+      if (p.kind === "choice_strength")
+        return p.strength === "locked" ? [`keep ${p.name}`] : p.strength === "considered" ? [`treat ${p.name} as one option to test`] : p.strength === "example" ? [`treat ${p.name} as an example`] : [];
+      if (p.kind === "geography") return p.strictness === "required" ? [`keep it in ${p.place}`] : p.strictness === "nearby" ? [`aim for ${p.place} or nearby`] : [];
+      return [];
+    })
+    .slice(0, 3);
+  if (!said.length) return "I have enough to work with.";
+  const list = said.length > 1 ? `${said.slice(0, -1).join(", ")} and ${said.at(-1)}` : said[0];
+  return `I have enough to work with. I’ll ${list}.`;
 }
 
 const keyOf = (answers: AnswerInput[]) =>

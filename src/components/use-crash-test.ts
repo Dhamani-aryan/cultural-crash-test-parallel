@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import type { AnswerInput, ClarifyEvent } from "@/lib/clarify/session";
+import { emptyClarify, isClarifyEvent, recoveryFor, reduceClarify, type ClarifyItem, type ClarifyView } from "./clarify-view";
 import type { IntakeState } from "@/lib/intake/types";
 import type {
   CulturalPlan,
@@ -19,7 +21,8 @@ export type LogEntry =
   | { kind: "evaluation"; evaluation: PlanEvaluation };
 
 export interface View {
-  phase: "idle" | "running" | "done" | "error";
+  /** "awaiting": the run paused on a clarification question until the user answers. */
+  phase: "idle" | "running" | "awaiting" | "done" | "error";
   /** Set when the server replays a recorded run instead of running live. */
   replay: string | null;
   log: LogEntry[];
@@ -29,6 +32,7 @@ export interface View {
   budget: { used: number; max: number } | null;
   result: RunState | null;
   error: string | null;
+  clarify: ClarifyView;
 }
 
 const initial: View = {
@@ -41,7 +45,19 @@ const initial: View = {
   budget: null,
   result: null,
   error: null,
+  clarify: emptyClarify,
 };
+
+type StreamEvent = RunEvent | ClarifyEvent;
+
+/** Fold one stream event: clarification events into the conversation, run events into the run. */
+export function reduceStream(v: View, e: StreamEvent): View {
+  if (!isClarifyEvent(e)) return reduce(v, e);
+  const clarify = reduceClarify(v.clarify, e);
+  return { ...v, clarify, phase: e.type === "clarification_required" ? "awaiting" : e.type === "run_started" || e.type === "ready" ? "running" : v.phase };
+}
+
+type RunInput = LaunchBriefInput | { intake: IntakeState; depth: "quick" | "thorough" };
 
 export function reduce(v: View, e: RunEvent): View {
   switch (e.type) {
@@ -78,7 +94,7 @@ export function reduce(v: View, e: RunEvent): View {
 }
 
 /** Parse server-sent events from a fetch body (the endpoint is POST, so no EventSource). */
-async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<RunEvent> {
+async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -95,7 +111,7 @@ async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<RunEve
         .filter((l) => l.startsWith("data: "))
         .map((l) => l.slice(6))
         .join("\n");
-      if (data) yield JSON.parse(data) as RunEvent;
+      if (data) yield JSON.parse(data) as StreamEvent;
     }
   }
 }
@@ -103,17 +119,46 @@ async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<RunEve
 export function useCrashTest() {
   const [view, setView] = useState<View>(initial);
   const abort = useRef<AbortController | null>(null);
+  /** The latest view, for continuing a stream from where the conversation is. */
+  const latest = useRef<View>(initial);
+  const lastInput = useRef<{ input: RunInput; fresh: boolean } | null>(null);
+  const show = useCallback((v: View) => {
+    latest.current = v;
+    setView(v);
+  }, []);
 
-  const run = useCallback(async (input: LaunchBriefInput | { intake: IntakeState; depth: "quick" | "thorough" }, fresh = false) => {
+  /** Read one response's events into the view, starting from `from`. */
+  const consume = useCallback(async (res: Response, from: View) => {
+    let current = from;
+    for await (const event of readSse(res.body!)) {
+      current = reduceStream(current, event);
+      show(current);
+    }
+    // A stream that pauses on a question is waiting for the user, not broken.
+    if (current.phase === "running") show({ ...current, phase: "error", error: "The connection closed before the run finished." });
+  }, [show]);
+
+  const fail = useCallback((controller: AbortController, err: unknown) => {
+    const v = latest.current;
+    if (controller.signal.aborted) {
+      show({ ...v, phase: v.result ? "done" : "error", error: v.result ? null : "Cancelled.", clarify: { ...v.clarify, sending: false, active: null } });
+      return;
+    }
+    show({ ...v, phase: "error", error: err instanceof Error ? err.message : String(err), clarify: { ...v.clarify, sending: false } });
+  }, [show]);
+
+  const run = useCallback(async (input: RunInput, fresh = false) => {
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
-    setView({ ...initial, phase: "running" });
+    lastInput.current = { input, fresh };
+    show({ ...initial, phase: "running" });
     try {
       const res = await fetch("/api/crashtest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify("intake" in input ? { ...input, fresh } : { brief: input, fresh }),
+        // Every run goes through the clarification gate; a clear brief continues straight into the run.
+        body: JSON.stringify("intake" in input ? { ...input, fresh, clarify: true } : { brief: input, fresh, clarify: true }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -125,39 +170,71 @@ export function useCrashTest() {
             : (detail ?? body?.error ?? `Request failed (${res.status})`),
         );
       }
-      let current: View = { ...initial, phase: "running" };
-      for await (const event of readSse(res.body)) {
-        current = reduce(current, event);
-        setView(current);
-      }
-      if (current.phase === "running") {
-        setView({ ...current, phase: "error", error: "The connection closed before the run finished." });
-      }
+      await consume(res, latest.current);
     } catch (err) {
-      if (controller.signal.aborted) {
-        setView((v) => ({ ...v, phase: v.result ? "done" : "error", error: v.result ? null : "Cancelled." }));
+      fail(controller, err);
+    }
+  }, [consume, fail, show]);
+
+  /**
+   * Answer the open question(s). The user's words appear at once as their message; the card and
+   * composer are disabled until the server replies, so an answer can't be sent twice.
+   */
+  const answer = useCallback(async (answers: AnswerInput[], receipt: string) => {
+    const v = latest.current;
+    if (v.phase !== "awaiting" || v.clarify.sending || !v.clarify.sessionId) return;
+    const controller = new AbortController();
+    abort.current = controller;
+    const userItem: ClarifyItem = { kind: "user", id: `u${Date.now()}`, text: receipt };
+    const sending: View = { ...v, error: null, clarify: { ...v.clarify, sending: true, recovery: null, items: [...v.clarify.items, userItem] } };
+    show(sending);
+    try {
+      const res = await fetch("/api/crashtest", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clarification: { sessionId: v.clarify.sessionId, answers }, fresh: lastInput.current?.fresh ?? false }),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        // Keep the conversation; take back the unsent answer and offer the one action that helps.
+        const recovery = recoveryFor(res.status);
+        show({ ...v, clarify: { ...v.clarify, sending: false, recovery, active: recovery.action === "retry" ? v.clarify.active : null } });
         return;
       }
-      setView((v) => ({ ...v, phase: "error", error: err instanceof Error ? err.message : String(err) }));
+      await consume(res, sending);
+    } catch (err) {
+      fail(controller, err);
     }
-  }, []);
+  }, [consume, fail, show]);
+
+  /** Start the same brief again (after an expired or already-answered question), keeping nothing stale. */
+  const restart = useCallback(() => {
+    if (lastInput.current) void run(lastInput.current.input, lastInput.current.fresh);
+  }, [run]);
+
+  /** Dismiss a recoverable refusal so the same question can be answered again. */
+  const retry = useCallback(() => {
+    const v = latest.current;
+    show({ ...v, clarify: { ...v.clarify, recovery: null } });
+  }, [show]);
 
   /** Closing the stream aborts the request; the server stops the run at its next step. */
   const cancel = useCallback(() => abort.current?.abort(), []);
   const reset = useCallback(() => {
     abort.current?.abort();
-    setView(initial);
-  }, []);
+    show(initial);
+  }, [show]);
 
   /** Show a finished run again (a saved chat), without running anything. */
-  const restore = useCallback((result: RunState | null) => {
+  const restore = useCallback((result: RunState | null, items: ClarifyItem[] = []) => {
     abort.current?.abort();
-    setView(
+    const clarify = { ...emptyClarify, items };
+    show(
       result
-        ? { ...initial, phase: "done", result, plan: result.plan, initialPlan: result.initialPlan, evidence: result.evidenceLedger }
-        : initial,
+        ? { ...initial, phase: "done", result, plan: result.plan, initialPlan: result.initialPlan, evidence: result.evidenceLedger, clarify }
+        : { ...initial, clarify },
     );
-  }, []);
+  }, [show]);
 
-  return { view, run, cancel, reset, restore };
+  return { view, run, answer, restart, retry, cancel, reset, restore };
 }

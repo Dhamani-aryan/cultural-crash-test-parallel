@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { MAX_MESSAGE, type Chip } from "@/lib/intake/types";
 import { chatTitle, getChats, getServerChats, putChats, subscribeChats, type SavedChat } from "./chat-store";
+import { ClarificationCard } from "./clarification";
+import { answerFromText } from "./clarify-view";
 import { RunResult } from "./run-result";
 import { useCrashTest } from "./use-crash-test";
 import { useIntake } from "./use-intake";
@@ -24,10 +26,12 @@ function Composer({
   onSend,
   busy,
   autoFocus,
+  placeholder = PLACEHOLDER,
 }: {
   onSend: (text: string) => void;
   busy: boolean;
   autoFocus?: boolean;
+  placeholder?: string;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -50,7 +54,7 @@ function Composer({
         rows={1}
         value={text}
         maxLength={MAX_MESSAGE}
-        placeholder={PLACEHOLDER}
+        placeholder={placeholder}
         onChange={(e) => {
           setText(e.target.value);
           e.target.style.height = "auto";
@@ -194,18 +198,19 @@ export function ChatApp() {
   // Keep the scroll at the newest message, including the one just sent.
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [s?.messages.length, pending, intake.busy, view.phase, view.log.length]);
+  }, [s?.messages.length, pending, intake.busy, view.phase, view.log.length, view.clarify.items.length, view.clarify.sending]);
 
   // Save the open chat whenever it changes (its finished run too).
   useEffect(() => {
     if (!s || !s.messages.some((m) => m.role === "user")) return;
     const existing = getChats().find((c) => c.id === s.intakeId);
     const result = view.phase === "done" && view.result ? view.result : (existing?.result ?? null);
+    const clarification = view.clarify.items.length ? view.clarify.items : existing?.clarification;
     putChats([
-      { id: s.intakeId, title: chatTitle(s), updatedAt: new Date().toISOString(), intake: s, result },
+      { id: s.intakeId, title: chatTitle(s), updatedAt: new Date().toISOString(), intake: s, result, clarification },
       ...getChats().filter((c) => c.id !== s.intakeId),
     ]);
-  }, [s, view.phase, view.result]);
+  }, [s, view.phase, view.result, view.clarify.items]);
 
   const handle = async (reply: Awaited<ReturnType<typeof intake.send>>) => {
     if (reply?.startRequested) crash.run({ intake: reply.state, depth: "thorough" });
@@ -230,14 +235,18 @@ export function ChatApp() {
   };
   const openChat = (c: SavedChat) => {
     intake.setState(c.intake);
-    crash.restore(c.result);
+    crash.restore(c.result, c.clarification ?? []);
     setSidebar(false);
   };
   const deleteChat = (id: string) => {
     putChats(getChats().filter((c) => c.id !== id));
     if (id === activeId) newChat();
   };
-  const busy = intake.busy || view.phase === "running";
+  const awaiting = view.phase === "awaiting";
+  const busy = intake.busy || view.phase === "running" || view.clarify.sending;
+  // While a question is open, the composer answers it.
+  const reply = (text: string) => crash.answer(answerFromText(text), text);
+  const lastQuestions = [...view.clarify.items].reverse().find((x) => x.kind === "questions");
   const lastStage = [...view.log].reverse().find((l) => l.kind === "stage");
   const messages = s?.messages ?? [];
   const inConversation = Boolean(s) || pending !== null;
@@ -308,6 +317,34 @@ export function ChatApp() {
                 ))}
                 {pending && <Bubble role="user">{pending}</Bubble>}
                 {intake.busy && <Thinking />}
+                {view.clarify.items.map((item) =>
+                  item.kind === "questions" ? (
+                    awaiting && item === lastQuestions && view.clarify.active ? (
+                      <ClarificationCard key={item.id} questions={item.questions} disabled={view.clarify.sending} onAnswer={(a) => crash.answer(a.answers, a.receipt)} />
+                    ) : (
+                      <Bubble key={item.id} role="assistant">
+                        {item.questions.map((q) => q.prompt).join("\n")}
+                      </Bubble>
+                    )
+                  ) : (
+                    <Bubble key={item.id} role={item.kind}>
+                      {item.text}
+                    </Bubble>
+                  ),
+                )}
+                {view.clarify.sending && <Thinking />}
+                {view.clarify.recovery && (
+                  <p className="text-sm text-nosupport" role="alert">
+                    {view.clarify.recovery.message}
+                    <button
+                      type="button"
+                      onClick={view.clarify.recovery.action === "restart" ? crash.restart : crash.retry}
+                      className="ml-2 text-accent hover:underline"
+                    >
+                      {view.clarify.recovery.action === "restart" ? "Start again" : "Try again"}
+                    </button>
+                  </p>
+                )}
                 {started && view.phase === "running" && (
                   <div className="flex items-center gap-3">
                     <Thinking label={lastStage?.kind === "stage" ? lastStage.message : "Starting…"} />
@@ -336,10 +373,10 @@ export function ChatApp() {
                 <div ref={end} />
               </div>
             </main>
-            {!started && (
+            {(!started || (awaiting && view.clarify.recovery?.action !== "restart")) && (
               <div className="shrink-0 bg-gradient-to-t from-bg via-bg to-transparent px-4 pb-6 pt-5">
                 <div className="mx-auto w-full max-w-[880px]">
-                  <Composer onSend={send} busy={busy} />
+                  {awaiting ? <Composer key="reply" onSend={reply} busy={busy} placeholder="Reply…" autoFocus /> : <Composer key="brief" onSend={send} busy={busy} />}
                 </div>
               </div>
             )}

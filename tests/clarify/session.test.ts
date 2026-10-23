@@ -26,6 +26,8 @@ describe("a clear brief", () => {
     );
     expect(of(events, "clarification_required")).toEqual([]);
     expect(events.map((e) => e.type)).toEqual(["assistant_message", "ready"]);
+    // What the brief settles, in plain words: no cue words quoted, no internal terms.
+    expect(of(events, "assistant_message")[0].text).toBe("I have enough to work with. I’ll keep Yard Market, treat Grey Lane as one option to test and aim for Shoreditch or nearby.");
     expect(session.state).toBe("ready");
     // "Booked" became a machine-checked lock without asking; "hoping" and "around" are recorded.
     expect(rules(session)).toEqual([
@@ -74,6 +76,10 @@ describe("one material question", () => {
     // The place the question asks about doesn't pick an option by itself.
     expect(interpretText(q, "Somewhere with a courtyard close to Shoreditch")).toEqual({ kind: "option", optionId: q.options[1].id });
     expect(interpretText(q, "We would like a courtyard space, ideally in Shoreditch")).toMatchObject({ kind: "custom" });
+    // Options made only of the question's own words are told apart by what differs between them.
+    const local = { ...q, prompt: "Should the partner be based in London, or is a broader local connection enough?", options: [{ ...q.options[0], id: "a", label: "London-based partner" }, { ...q.options[1], id: "b", label: "Locally connected partner" }] };
+    expect(interpretText(local, "It has to be a London-based partner")).toEqual({ kind: "option", optionId: "a" });
+    expect(interpretText(local, "A locally connected one is enough")).toEqual({ kind: "option", optionId: "b" });
     expect(interpretText(q, "How long does a run take?")).toEqual({ kind: "unrelated" });
     expect(interpretText(q, "I'm not sure, use your judgement")).toEqual({ kind: "delegate" });
 
