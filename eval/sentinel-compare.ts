@@ -17,8 +17,9 @@ import { getLlm } from "../src/lib/llm";
 import { marketById } from "../src/lib/markets";
 import { isFrozen } from "./frozen";
 import { judgePlans } from "./judge";
+import { SENTINEL_IDS } from "./sentinels";
 
-export const SENTINELS = ["streetwear-new-york", "luxury-handbags-london", "accessories-mumbai", "sneakers-madrid", "sun-care-sydney"];
+const SENTINELS = SENTINEL_IDS;
 const BASE = process.env.V2_TAG ?? "parallel-v2";
 const tags = process.argv.slice(2).filter((a) => a !== "--");
 if (!tags.length) throw new Error("Usage: eval:sentinel-compare -- <v3 tag> [<v3 tag> …]");

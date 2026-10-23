@@ -27,6 +27,7 @@
     "eval:fingerprint": "tsx eval/fingerprint.ts",
     "eval:freeze-anchors": "tsx eval/freeze-anchors.ts",
     "eval:sentinel-compare": "tsx --env-file-if-exists=.env.local eval/sentinel-compare.ts",
+    "eval:final-report": "tsx --env-file-if-exists=.env.local eval/final-report.ts",
     "llm:login": "tsx --env-file-if-exists=.env.local scripts/chatgpt-login.ts",
     "llm:push-credential": "tsx --env-file-if-exists=.env.local scripts/push-chatgpt-credential.ts"
   },
