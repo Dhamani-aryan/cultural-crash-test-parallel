@@ -13,7 +13,7 @@ import { itemsFrom, sanitizeInsights } from "./ledger";
 import { compareVectors, evidenceVector, roleKey } from "./matrix";
 import { briefText, categoryOf, directionVocabulary, mapDirection, resolveEntityComponent, toRef } from "./plan";
 import { briefTerms, categoryOfVenue, fitsBrief, isFoodAndDrink, repairDirection, screen, type DraftTrial } from "./repair";
-import { avoidedMatch, centralityFlag, hostTier, mainstreamFlag, neighborhoodFit, preferredCategories, type Centroid, type RoleCheck } from "./screens";
+import { avoidedMatch, centralityFlag, distanceKm, hostTier, mainstreamFlag, neighborhoodFit, preferredCategories, type Centroid, type RoleCheck } from "./screens";
 import {
   SLOTS,
   SLOT_LABEL,
@@ -275,9 +275,10 @@ async function screenEntity(
   const l = locality.get(e.id);
   let local = l ? (l.local ? "pass" : l.why === "from another country" ? "flag" : "unknown") : "unknown";
   if (slot === "event_place") {
-    const n = neighborhoodFit(e, input.neighborhood);
+    const n = neighborhoodFit(e, input.neighborhood, contract.neighborhoods[0]?.value);
     if (n.fit === "near") local = "pass";
     if (n.fit === "far") local = "flag";
+    if (n.named) notes.push(`Qloo places it in ${contract.neighborhoods[0]?.value}`);
     if (n.km !== null) notes.push(`${n.km.toFixed(1)} km from ${contract.neighborhoods[0]?.value}`);
   }
   const ruled = fitsBrief(e, brief, { requireAttributes: false });
@@ -671,27 +672,49 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
   };
 }
 
-/** A shared reading for the named neighbourhood: the centroid of the venues Qloo places there. */
+/**
+ * A shared reading for the named neighbourhood. Qloo's own locality record gives the point when it
+ * is in this city (its full name says so) and agrees with where Qloo places the area's venues
+ * (within 15 km of their median); otherwise the median of those venues is used. Fewer than five
+ * venues with coordinates and no such locality: unknown.
+ */
 export async function neighborhoodCentroid(ctx: GatherContext, contract: IntentContract): Promise<Centroid | null> {
   const hood = contract.neighborhoods[0];
   if (!hood) return null;
   const q: InsightsInput = { filterType: "urn:entity:place", filterLocationQuery: `${hood.value}, ${ctx.market.qlooLocation}`, take: 25 };
-  const r = await ctx.client.getInsights(q);
+  const [r, places] = await Promise.all([
+    ctx.client.getInsights(q),
+    ctx.client.searchEntities({ query: hood.value, types: ["urn:entity:locality"], take: 5 }).catch((err) => {
+      if (err instanceof BudgetExceeded) throw err;
+      return [];
+    }),
+  ]);
   const pts = r.entities.flatMap((e) => (e.geocode?.latitude != null && e.geocode.longitude != null && e.geocode.countryCode?.toUpperCase() === ctx.market.country ? [{ lat: e.geocode.latitude, lon: e.geocode.longitude }] : []));
-  const rec = ctx.ledger.add({
-    purpose: `Where ${hood.value} is: venues Qloo places there ("${hood.phrase}")`,
-    queryKind: "insights",
-    sanitizedRequest: sanitizeInsights(q),
-    qlooEntityIds: [],
-    results: itemsFrom(r),
-    resultCount: pts.length,
-    coverageStatus: pts.length >= 5 ? "usable" : pts.length ? "partial" : "empty",
-    warnings: pts.length >= 5 ? [] : [`Only ${pts.length} venue(s) with coordinates: neighbourhood fit is unknown.`],
-  });
-  if (pts.length < 5) return null;
   // The median point resists a stray venue far away.
   const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
-  return { name: hood.value, lat: med(pts.map((p) => p.lat)), lon: med(pts.map((p) => p.lon)), count: pts.length, evidenceId: rec.evidenceId };
+  const venues = pts.length >= 5 ? { lat: med(pts.map((p) => p.lat)), lon: med(pts.map((p) => p.lon)) } : null;
+  const city = [ctx.market.label, ctx.market.qlooLocation].map((x) => x.toLowerCase());
+  const locality = places.find(
+    (e) =>
+      nameKey(e.name) === nameKey(hood.value) &&
+      e.geocode?.latitude != null &&
+      e.geocode.longitude != null &&
+      e.akas.some((a) => city.some((c) => a.toLowerCase().includes(c))) &&
+      (!venues || distanceKm({ lat: e.geocode.latitude, lon: e.geocode.longitude }, venues) <= 15),
+  );
+  const at = locality ? { lat: locality.geocode!.latitude!, lon: locality.geocode!.longitude! } : venues;
+  const rec = ctx.ledger.add({
+    purpose: `Where ${hood.value} is ("${hood.phrase}"): ${locality ? "Qloo's locality record" : "the venues Qloo places there"}`,
+    queryKind: "insights",
+    sanitizedRequest: { ...sanitizeInsights(q), "locality.search": hood.value },
+    qlooEntityIds: locality ? [locality.id] : [],
+    results: [...(locality ? [{ id: locality.id, name: `${locality.name} (locality)` }] : []), ...itemsFrom(r)],
+    resultCount: pts.length + (locality ? 1 : 0),
+    coverageStatus: at ? "usable" : pts.length ? "partial" : "empty",
+    warnings: at ? [] : [`Only ${pts.length} venue(s) with coordinates and no matching locality: neighbourhood fit is unknown.`],
+  });
+  if (!at) return null;
+  return { name: hood.value, lat: at.lat, lon: at.lon, count: pts.length, evidenceId: rec.evidenceId };
 }
 
 /** Role readings for components the agent didn't pool (the user's and the LLM's), so every plan is screened alike. */

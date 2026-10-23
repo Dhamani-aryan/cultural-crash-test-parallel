@@ -36,9 +36,10 @@ export const PARALLEL_VERSION = "parallel:v3";
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
  * structured role readings), weighted user preferences, and the v3 plan-comparison order, in
- * which distinctiveness ranks plans only when the brief asks for it.
+ * which distinctiveness ranks plans only when the brief asks for it. v3: a venue Qloo files under
+ * the named neighbourhood is in it, and coordinates are read where Qloo returns them.
  */
-export const EVIDENCE_RUBRIC_VERSION = "evidence:v2";
+export const EVIDENCE_RUBRIC_VERSION = "evidence:v3";
 /** The blind, order-rotated adjudication protocol. */
 export const ADJUDICATION_VERSION = "adjudicate:v1";
 

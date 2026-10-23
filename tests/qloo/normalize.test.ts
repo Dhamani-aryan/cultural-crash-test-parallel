@@ -106,3 +106,45 @@ describe("cleanDescription", () => {
     expect(cleanDescription(null)).toBeNull();
   });
 });
+
+describe("place coordinates and neighbourhood", () => {
+  // The shape the hackathon API returns for a place: coordinates in the top-level `location`,
+  // the address breakdown (with the neighbourhood as its name) in properties.geocode.
+  const place = (geocode: Record<string, unknown> | undefined, location?: Record<string, unknown>) =>
+    normalizeInsights({
+      success: true,
+      results: {
+        entities: [
+          {
+            name: "Fake Hall",
+            entity_id: "FAKE-PLACE-0001",
+            type: "urn:entity:place",
+            properties: geocode ? { geocode } : {},
+            ...(location ? { location } : {}),
+          },
+        ],
+      },
+    }).entities[0];
+  const nyc = { city: "New York", name: "Lower East Side", metro: "New York City", country: "United States", country_code: "US", admin1_region: "New York", admin2_region: "New York County" };
+
+  it("reads latitude and longitude from the top-level location", () => {
+    expect(place(nyc, { lat: 40.7222, lon: -73.9874, geohash: "dr5rsm" }).geocode).toEqual({
+      city: "New York",
+      metro: "New York City",
+      countryCode: "US",
+      latitude: 40.7222,
+      longitude: -73.9874,
+      neighborhood: "Lower East Side",
+    });
+    // Coordinates alone still give a geocode; no coordinates stay null.
+    expect(place(undefined, { lat: 1, lon: 2 }).geocode).toMatchObject({ latitude: 1, longitude: 2, countryCode: null, neighborhood: null });
+    expect(place(nyc).geocode).toMatchObject({ latitude: null, longitude: null });
+    expect(place(undefined).geocode).toBeNull();
+  });
+
+  it("takes the geocode name as a neighbourhood only when it names something below the city", () => {
+    expect(place({ ...nyc, name: "New York" }).geocode!.neighborhood).toBeNull();
+    expect(place({ ...nyc, name: "New York County" }).geocode!.neighborhood).toBeNull();
+    expect(place({ city: "Sydney", name: "Bondi Beach", country_code: "AU" }).geocode!.neighborhood).toBe("Bondi Beach");
+  });
+});

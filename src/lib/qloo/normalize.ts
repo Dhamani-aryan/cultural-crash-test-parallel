@@ -133,6 +133,8 @@ export function normalizeEntity(raw: unknown): QlooEntity | null {
   if (!id || !name) return null;
   const props = obj(raw.properties);
   const geo = isObj(props.geocode) ? props.geocode : null;
+  // Coordinates come in the top-level `location` ({ lat, lon }), not in properties.geocode.
+  const loc = isObj(raw.location) ? raw.location : null;
   const akas = akasOf(props);
   const releaseCountry = props.release_country;
   return {
@@ -151,15 +153,27 @@ export function normalizeEntity(raw: unknown): QlooEntity | null {
     imageUrl: imageUrl(props),
     popularity: num(raw.popularity),
     disambiguation: str(raw.disambiguation),
-    geocode: geo && {
-      city: str(geo.city),
-      metro: str(geo.metro),
-      countryCode: str(geo.country_code),
-      latitude: num(geo.latitude),
-      longitude: num(geo.longitude),
-    },
+    geocode:
+      geo || loc
+        ? {
+            city: geo ? str(geo.city) : null,
+            metro: geo ? str(geo.metro) : null,
+            countryCode: geo ? str(geo.country_code) : null,
+            latitude: (geo ? num(geo.latitude) : null) ?? (loc ? num(loc.lat) : null),
+            longitude: (geo ? num(geo.longitude) : null) ?? (loc ? num(loc.lon) : null),
+            neighborhood: neighborhoodOf(geo),
+          }
+        : null,
     tags: tagsOf(raw),
   };
+}
+
+/** A place's geocode name when it names something below the city (a neighbourhood), else null. */
+function neighborhoodOf(geo: Obj | null): string | null {
+  const name = geo ? str(geo.name) : null;
+  if (!name || !geo) return null;
+  const above = [geo.city, geo.metro, geo.admin1_region, geo.admin2_region, geo.country].map((x) => str(x)?.toLowerCase());
+  return above.includes(name.toLowerCase()) ? null : name;
 }
 
 function requireSuccess(body: unknown, path: string): Obj {

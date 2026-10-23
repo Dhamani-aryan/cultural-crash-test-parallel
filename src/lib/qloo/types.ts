@@ -52,6 +52,8 @@ export interface QlooEntity {
     countryCode: string | null;
     latitude: number | null;
     longitude: number | null;
+    /** The neighbourhood Qloo files a place under (its geocode name, e.g. "Lower East Side"), when it differs from the city. */
+    neighborhood?: string | null;
   } | null;
   tags: { id: string; name: string | null; type: string | null }[];
 }

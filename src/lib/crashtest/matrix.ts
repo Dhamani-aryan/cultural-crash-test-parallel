@@ -57,7 +57,7 @@ export const RULES = {
   "R-anchor-hypothesis": "Model-suggested audience anchors are hypotheses a person should confirm.",
   "R-user-considered": "A choice the user was only considering is a weaker statement of preference than a named choice.",
   "R-host-tier": "A venue should be a kind of place the brief's event format calls for, not merely one that can host something.",
-  "R-neighborhood": "A venue near the neighbourhood the brief names fits it; far from it doesn't. Without coordinates it is unknown.",
+  "R-neighborhood": "A venue Qloo files under, or near, the neighbourhood the brief names fits it; far from it doesn't. Without either it is unknown.",
   "R-distinct-requested": "When the brief asks for independent, local or non-generic choices, a top-0.5% mainstream default counts against it.",
   "R-product-central": "A headline-scale act or an arena-scale room can make the product an afterthought.",
   "R-avoided-quality": "A choice Qloo describes with something the brief says to avoid counts against it.",
@@ -294,13 +294,15 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
           );
         const hood = k.neighborhoods[0];
         if (hood) {
-          const n = neighborhoodFit(fact, ctx.neighborhood ?? null);
+          const n = neighborhoodFit(fact, ctx.neighborhood ?? null, hood.value);
           add(
             slot,
             "local",
             "neighborhood",
             n.fit === "near"
-              ? `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, which the brief names ("${hood.phrase}").`
+              ? n.named
+                ? `Qloo places ${comp.label} in ${hood.value}, which the brief names ("${hood.phrase}").`
+                : `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, which the brief names ("${hood.phrase}").`
               : n.fit === "far"
                 ? `${comp.label} is ${n.km!.toFixed(1)} km from ${hood.value}, which the brief names ("${hood.phrase}").`
                 : `Whether ${comp.label} is in ${hood.value} can't be told from Qloo's coordinates.`,

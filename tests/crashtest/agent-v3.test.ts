@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import { RunResult } from "@/components/run-result";
-import { BEAM_WIDTH, beamSearch, planFingerprint, runEvidenceAgent, weakestSlot, type PoolCandidate, type Proxy } from "@/lib/crashtest/agent";
+import { BEAM_WIDTH, beamSearch, neighborhoodCentroid, planFingerprint, runEvidenceAgent, weakestSlot, type PoolCandidate, type Proxy } from "@/lib/crashtest/agent";
 import { evaluatePlan } from "@/lib/crashtest/evaluate";
 import { gatherEvidence, type GatherContext } from "@/lib/crashtest/gather";
 import { compileIntent } from "@/lib/crashtest/intent";
@@ -11,7 +11,7 @@ import { buildEvidenceMatrix, type MatrixContext } from "@/lib/crashtest/matrix"
 import { parallelView, toParallelMarkdown } from "@/lib/crashtest/parallel-view";
 import { toRef } from "@/lib/crashtest/plan";
 import { runCrashTest } from "@/lib/crashtest/run";
-import type { RoleCheck } from "@/lib/crashtest/screens";
+import { neighborhoodFit, type RoleCheck } from "@/lib/crashtest/screens";
 import { LaunchBriefSchema, SLOTS, type CandidatePlan, type Component, type CulturalPlan, type LaunchBriefInput, type RunState, type Slot } from "@/lib/crashtest/types";
 import { PARALLEL_VERSION } from "@/lib/crashtest/version";
 import { marketById } from "@/lib/markets";
@@ -161,6 +161,67 @@ describe("v3: screens", () => {
     for (const n of ["Near Hall", "Far Hall"]) expect(hoodClaim(unlocated.state, n)).toMatchObject({ stance: "unknown", strength: "unknown" });
     expect(unlocated.p.agent!.pools.find((r) => r.name === "Far Hall")!.screens.locality).not.toBe("flag");
     expect(label(cand(unlocated.state, "agent"), "event_place")).toBe("Far Hall");
+
+    // Qloo filing a venue under the named neighbourhood is evidence on its own, without a centroid.
+    const labelled = venue("l1", "Label Hall", "event_venue", { ...geo(51.5, -0.1), latitude: null, longitude: null, neighborhood: "Shoreditch" } as never);
+    const named = await run(brief, {}, {}, [far, labelled]);
+    expect(hoodClaim(named.state, "Label Hall")).toMatchObject({ stance: "supports", claim: expect.stringMatching(/Qloo places Label Hall in Shoreditch/) });
+    expect(named.p.agent!.pools.find((r) => r.name === "Label Hall")!.screens.notes).toContain("Qloo places it in Shoreditch");
+    expect(label(cand(named.state, "agent"), "event_place")).toBe("Label Hall");
+  });
+
+  it("reads a neighbourhood label as near, and a different label or distance alone as never far by name", () => {
+    const at = (lat: number | null, lon: number | null, neighborhood: string | null = null) => ({ geocode: { city: "London", metro: null, countryCode: "GB", latitude: lat, longitude: lon, neighborhood } });
+    const c = { name: "Shoreditch", lat: 51.524, lon: -0.078, count: 6, evidenceId: "e" };
+    expect(neighborhoodFit(at(null, null, "Shoreditch"), null, "Shoreditch")).toMatchObject({ fit: "near", named: true, km: null });
+    expect(neighborhoodFit(at(null, null, "Dalston"), null, "Shoreditch")).toMatchObject({ fit: "unknown", named: false });
+    expect(neighborhoodFit(at(51.525, -0.079), c, "Shoreditch")).toMatchObject({ fit: "near", named: false });
+    expect(neighborhoodFit(at(51.4, -0.3, "Dalston"), c, "Shoreditch").fit).toBe("far");
+    expect(neighborhoodFit(at(51.55, -0.12), c, "Shoreditch").fit).toBe("unknown");
+    // A label match wins over distance: Qloo says it is there.
+    expect(neighborhoodFit(at(51.4, -0.3, "shoreditch"), c, "Shoreditch").fit).toBe("near");
+  });
+});
+
+describe("v3: where the named neighbourhood is", () => {
+  const market = marketById("london")!;
+  const contract = compileIntent(LaunchBriefSchema.parse({ ...LONDON_BRIEF, sourceText: "A pop-up in Shoreditch." }), market, { names: [], source: "none" });
+  const place = (i: number, lat: number, lon: number, country = "GB") => entity(`v${i}`, { name: `V${i}`, type: "urn:entity:place", geocode: { city: "London", metro: null, countryCode: country, latitude: lat, longitude: lon } });
+  const locality = (id: string, lat: number, lon: number, aka: string) => ({ ...entity(id, { name: "Shoreditch", type: "urn:entity:locality", akas: [aka], geocode: { city: null, metro: null, countryCode: null, latitude: lat, longitude: lon } }), rank: 1 });
+  const centroid = (venues: QlooEntity[], localities: ReturnType<typeof locality>[]) => {
+    const client = {
+      ...worldClient().client,
+      getInsights: async () => ({ entities: venues.map((e, i) => ({ ...e, rank: i + 1, affinity: null, affinityRank: null, explainability: null })), tags: [], aggregateExplainability: null, durationMs: null }),
+      searchEntities: async () => localities,
+    };
+    const ledger = createLedger(() => 0);
+    return neighborhoodCentroid({ client, ledger, market }, contract).then((c) => ({ c, record: ledger.records.at(-1)! }));
+  };
+  // Five venues around Covent Garden, the way popular venues can skew a neighbourhood query.
+  const skewed = [0, 1, 2, 3, 4].map((i) => place(i, 51.511 + i * 0.001, -0.123 - i * 0.001));
+
+  it("prefers Qloo's locality record in this city that agrees with the venues", async () => {
+    const { c, record } = await centroid(skewed, [locality("loc-us", 40.0, -75.0, "Shoreditch, Pennsylvania, United States"), locality("loc-uk", 51.5245, -0.0781, "Shoreditch, London, England, United Kingdom")]);
+    expect(c).toMatchObject({ lat: 51.5245, lon: -0.0781, count: 5 });
+    expect(record).toMatchObject({ qlooEntityIds: ["loc-uk"], coverageStatus: "usable" });
+    expect(record.purpose).toMatch(/Qloo's locality record/);
+  });
+
+  it("falls back to the venues' median when no locality is in this city, or one disagrees with them", async () => {
+    for (const locs of [[locality("loc-us", 40.0, -75.0, "Shoreditch, Pennsylvania, United States")], [locality("loc-far", 51.2, -0.5, "Shoreditch, London")]]) {
+      const { c, record } = await centroid(skewed, locs);
+      expect(c!.lat).toBeCloseTo(51.513, 6);
+      expect(c!.lon).toBeCloseTo(-0.125, 6);
+      expect(record.purpose).toMatch(/the venues Qloo places there/);
+    }
+  });
+
+  it("is unknown without five located venues or a matching locality, and ignores venues abroad", async () => {
+    const abroad = [0, 1, 2, 3, 4].map((i) => place(i, 51.5, -0.1, "US"));
+    expect((await centroid(abroad, [])).c).toBeNull();
+    expect((await centroid(skewed.slice(0, 4), [])).c).toBeNull();
+    // A matching locality is enough on its own.
+    expect((await centroid(skewed.slice(0, 4), [locality("loc-uk", 51.5245, -0.0781, "Shoreditch, London")])).c).toMatchObject({ lat: 51.5245, count: 4 });
   });
 });
 
@@ -317,7 +378,7 @@ describe("v3: honest outcomes and versions", () => {
     const { p } = await run();
     expect(PARALLEL_VERSION).toBe("parallel:v3");
     expect(p.architectureVersion).toBe("parallel:v3");
-    expect(p.config).toMatchObject({ contractVersion: "contract:v1", screensVersion: "screens:v1", beamWidth: BEAM_WIDTH, challengeRounds: 2, model: "fake" });
+    expect(p.config).toMatchObject({ contractVersion: "contract:v1", screensVersion: "screens:v2", beamWidth: BEAM_WIDTH, challengeRounds: 2, model: "fake" });
     expect(p.config!.promptsFingerprint).toMatch(/^[0-9a-f]{16}$/);
     expect(p.agent!.bundlesTested).toBeGreaterThan(0);
     for (const s of SLOTS.filter((s) => s !== "creative_direction")) expect(p.agent!.pools.some((r) => r.slot === s)).toBe(true);

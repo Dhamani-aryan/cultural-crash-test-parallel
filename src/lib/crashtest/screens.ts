@@ -1,3 +1,4 @@
+import { nameKey } from "@/lib/engine/stats";
 import type { QlooEntity } from "@/lib/qloo";
 import { wantsFormat, type IntentContract } from "./intent";
 import { venueFormat } from "./repair";
@@ -7,9 +8,10 @@ import { venueFormat } from "./repair";
  * scores every track's plans, so a rule never applies to one plan and not another. Each is
  * deterministic, reads only the brief-intent contract and Qloo's own records, and returns
  * "unknown" when the evidence isn't there. Soft screens shape ranking and explanations; the
- * hard rules of the brief are elsewhere and stay vetoes.
+ * hard rules of the brief are elsewhere and stay vetoes. v2: neighbourhood fit reads Qloo's own
+ * neighbourhood label and the coordinates Qloo returns (v1 never received coordinates).
  */
-export const SCREENS_VERSION = "screens:v1";
+export const SCREENS_VERSION = "screens:v2";
 
 const cat = (c: string) => `urn:tag:category:place:${c}`;
 
@@ -55,11 +57,22 @@ export function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lo
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
 
-/** Within 2 km of the named neighbourhood's venues is near; beyond 6 km is far; otherwise, or without coordinates, unknown. */
-export function neighborhoodFit(e: Pick<QlooEntity, "geocode"> | undefined, c: Centroid | null): { km: number | null; fit: "near" | "far" | "unknown" } {
-  if (!c || e?.geocode?.latitude == null || e.geocode.longitude == null) return { km: null, fit: "unknown" };
-  const km = distanceKm({ lat: e.geocode.latitude, lon: e.geocode.longitude }, c);
-  return { km, fit: km <= 2 ? "near" : km > 6 ? "far" : "unknown" };
+/**
+ * Is a venue in the neighbourhood the brief names? Qloo filing it under that neighbourhood, or
+ * lying within 2 km of the neighbourhood's venues, is near; beyond 6 km is far; otherwise, or
+ * without coordinates, unknown. A different neighbourhood label alone never makes it far.
+ */
+export function neighborhoodFit(
+  e: Pick<QlooEntity, "geocode"> | undefined,
+  c: Centroid | null,
+  hood?: string,
+): { km: number | null; fit: "near" | "far" | "unknown"; named: boolean } {
+  const label = e?.geocode?.neighborhood;
+  const named = !!hood && !!label && nameKey(label) === nameKey(hood);
+  const km = c && e?.geocode?.latitude != null && e.geocode.longitude != null ? distanceKm({ lat: e.geocode.latitude, lon: e.geocode.longitude }, c) : null;
+  if (named) return { km, fit: "near", named };
+  if (km === null) return { km, fit: "unknown", named };
+  return { km, fit: km <= 2 ? "near" : km > 6 ? "far" : "unknown", named };
 }
 
 /** Top-0.5% popularity: a mainstream default. It counts against a choice only when the brief asks for distinctiveness. */
