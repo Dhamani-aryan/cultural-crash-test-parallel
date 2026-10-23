@@ -130,6 +130,9 @@ describe("screens:v4: selection", () => {
     expect(f.notes.map((n) => n.slot)).toEqual(["brand_collaboration", "event_place"]);
     const user = { ...plan, components: plan.components.map((c) => ({ ...c, origin: "user_provided" as const })) };
     expect(selectionFlags(user, (c) => by[c.label], indie).intent).toBe(0);
+    // A doubt names the screen that raised it, never a note that passed.
+    const doubted = selectionFlags(plan, (c) => (c.label === "Star" ? screens({ role: "doubtful", notes: ["host: preferred", "role check: doubtful"] }) : by[c.label]), indie);
+    expect(doubted.notes.find((n) => n.label === "Star")!.why).toBe("role check: doubtful");
     const locked = { ...plan, components: plan.components.map((c) => ({ ...c, locked: true })) };
     expect(selectionFlags(locked, (c) => by[c.label], indie)).toMatchObject({ intent: 0, role: 0, guard: null });
   });

@@ -564,7 +564,9 @@ export function selectionFlags(plan: CulturalPlan, screensOf: (c: Component) => 
     const user = c.origin === "user_provided";
     if (s.role === "fail" || s.role === "doubtful") {
       role += s.role === "fail" ? 1 : 0.5;
-      notes.push({ slot: c.slot, label: c.label, why: s.notes.find((n) => n.startsWith("brand:") || n.startsWith("host:") || n.startsWith("role check")) ?? "its role is doubtful" });
+      // Name the screen that actually raised the doubt, not a note that passed.
+      const cause = [/^brand: /, /^host: (possible|unknown|unsuitable)/, /^role check: (doubtful|wrong)/].map((re) => s.notes.find((n) => re.test(n))).find(Boolean);
+      notes.push({ slot: c.slot, label: c.label, why: cause ?? "its role is doubtful" });
     }
     if (!user && s.distinct === "flag") {
       intent += 1;
