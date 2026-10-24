@@ -69,5 +69,21 @@ Response: keep these separate in the UI and evaluation. Order sensitivity calls 
 4. Do not rerun a stable case as a control unless the changed rule can plausibly affect it.
 5. Run all 15 frozen scenarios only once at a release/promotion checkpoint.
 
-For the current change, only `upcycled-denim-tokyo` is a justified future live rerun. Mumbai needs no rerun; Tokyo eyewear already demonstrated the venue-role improvement; stable scenarios are out of scope.
+For the current change, only `upcycled-denim-tokyo` justified a live rerun. That targeted v6 run is now complete; Mumbai needs no rerun, Tokyo eyewear already demonstrated the venue-role improvement, and stable scenarios remain out of scope.
+
+## Targeted v6 result
+
+`parallel-v6-targeted-r1` ran only `upcycled-denim-tokyo`, with the frozen v2 audience anchor:
+
+- initial → final support: **2/4 → 3/4**;
+- final track: agent;
+- model calls: **12**;
+- outbound Qloo requests: **265**;
+- both blind-order checks preserved the same leader;
+- the false “fashion is forbidden” contradiction disappeared;
+- Harunemuri, the user's considered artist, was retained;
+- one real contradiction remained: MONKEY CAFE / MONKEY GALLERY is 2.6 km outside Shimokitazawa.
+
+The last point exposed a calibration problem rather than a search problem: a consistent blind ordering was being labelled stable even though the leading plan still contradicted the named neighbourhood. The result projection and live final-verdict builder now force any such plan to remain **Provisional** until a person accepts the trade-off or the venue is revised. This rule is deterministic and was verified against the saved trace without another live run.
+
 

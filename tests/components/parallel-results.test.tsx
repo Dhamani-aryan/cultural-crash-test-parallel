@@ -110,6 +110,31 @@ describe("parallel results", () => {
     expect(view.summary.stability).toMatch(/hypothesis for human validation/);
   });
 
+  it("keeps a stable ordering provisional while its chosen plan contradicts the brief", async () => {
+    const state = await parallel();
+    const winner = state.parallel!.verdict.candidateId!;
+    state.parallel!.matrix.claims.push({
+      candidateId: winner,
+      slot: "event_place",
+      ruleId: "R-neighborhood",
+      dimension: "local",
+      stance: "contradicts",
+      strength: "moderate",
+      claimId: `${winner}/event_place/test-neighborhood`,
+      claim: "The venue is outside the neighbourhood named in the brief.",
+      evidenceIds: [],
+      limitations: [],
+      source: "logical_rubric",
+    });
+    const view = parallelView(state)!;
+    expect(view.summary).toMatchObject({
+      headline: "Provisional plan",
+      stable: false,
+      provisional: true,
+    });
+    expect(view.summary.stability).toMatch(/explicit brief contradiction/);
+  });
+
   it("22. a replayed (serialised) state gives the same comparison, decision path and report", async () => {
     const state = await parallel(LONDON_BRIEF, {}, { noCandidates: ["brand"] });
     const replayed = JSON.parse(

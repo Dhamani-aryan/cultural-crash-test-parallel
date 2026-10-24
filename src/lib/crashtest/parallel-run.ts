@@ -682,6 +682,13 @@ function finalVerdict(x: {
 }): FinalVerdict {
   const { chosen, fin, matrix } = x;
   const humanChecks: string[] = [];
+  const semanticContradictions = chosen
+    ? claimsOf(matrix, chosen.candidateId).filter(
+        (claim) =>
+          claim.stance === "contradicts" &&
+          (claim.dimension === "role_fit" || claim.ruleId === "R-neighborhood"),
+      )
+    : [];
   if (fin.verdict === "unstable")
     humanChecks.push(
       `The blind judge's verdict changed with the order the plans were shown in. ${chosen ? `The plan shown leads on the recorded evidence, but a person should choose.` : "A person should choose."}`,
@@ -692,6 +699,12 @@ function finalVerdict(x: {
     );
   if (fin.verdict === "insufficient_evidence")
     humanChecks.push(`No plan can be recommended: ${fin.rationale}`);
+  if (semanticContradictions.length)
+    humanChecks.push(
+      `The leading plan still conflicts with the brief: ${semanticContradictions
+        .map((claim) => claim.claim)
+        .join(" ")} Treat it as provisional unless that trade-off is accepted.`,
+    );
   if (x.anchorSource === "model_hypothesis") humanChecks.push(x.anchorNotes[0]);
   const anchorReversals =
     x.stability?.checks.filter((check) => check.outcome === "reversed" && check.kind === "anchor_dropout" && check.omittedAnchor) ?? [];
@@ -778,9 +791,17 @@ function finalVerdict(x: {
     candidateId: chosen?.candidateId ?? null,
     track: chosen?.track ?? null,
     verdict: fin.verdict,
-    stable: fin.verdict === "winner" && x.decidedBy === "adjudication" && !x.stability?.reversed,
+    stable:
+      fin.verdict === "winner" &&
+      x.decidedBy === "adjudication" &&
+      !x.stability?.reversed &&
+      semanticContradictions.length === 0,
     decidedBy: x.decidedBy,
-    provisional: !!chosen && (x.decidedBy === "evidence_order" || !!x.stability?.reversed),
+    provisional:
+      !!chosen &&
+      (x.decidedBy === "evidence_order" ||
+        !!x.stability?.reversed ||
+        semanticContradictions.length > 0),
     plan: chosen?.plan ?? null,
     open: chosen?.open ?? [],
     evaluation: x.finalEval,

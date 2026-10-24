@@ -238,17 +238,28 @@ export function parallelView(state: RunState): ParallelView | null {
   // A consistent ordering is not the same as evidential support. Keep the proposed plan visible as
   // a hypothesis, but never present a zero-support winner as a validated recommendation.
   const evidenceInsufficient = !!F && supportedCount === 0;
+  const semanticContradictions = F
+    ? p.matrix.claims.filter(
+        (claim) =>
+          claim.candidateId === F.candidateId &&
+          claim.stance === "contradicts" &&
+          (claim.dimension === "role_fit" || claim.ruleId === "R-neighborhood"),
+      )
+    : [];
   const hardTotal = state.brief.constraints.filter((c) => c.kind === "hard").length;
   const violations = p.verdict.evaluation?.hardConstraintViolations.length ?? 0;
   const v = p.verdict;
   const audit = p.stability;
   // Recordings from before parallel:v3 don't carry the flag; the same rule applies to them.
-  const provisional = evidenceInsufficient || (v.provisional ?? (!!F && v.decidedBy === "evidence_order"));
+  const provisional =
+    evidenceInsufficient ||
+    semanticContradictions.length > 0 ||
+    (v.provisional ?? (!!F && v.decidedBy === "evidence_order"));
   const summary: SummaryView = {
     winner: F ? WINNER_TEXT[F.track] : "No recommendation",
     winnerTrack: F ? TRACK_LETTER[F.track] : null,
     verdict: VERDICT_TEXT[v.verdict],
-    stable: v.stable && !evidenceInsufficient,
+    stable: v.stable && !evidenceInsufficient && semanticContradictions.length === 0,
     provisional,
     headline: evidenceInsufficient
       ? "Insufficient Qloo evidence"
@@ -257,7 +268,9 @@ export function parallelView(state: RunState): ParallelView | null {
         : "Best complete plan",
     stability: evidenceInsufficient
       ? "Insufficient evidence: Qloo did not support any choice in this plan. Treat it as a hypothesis for human validation, not a validated recommendation."
-      : audit?.reversed
+      : semanticContradictions.length
+        ? `Provisional: the leading plan still has ${semanticContradictions.length} explicit brief contradiction${semanticContradictions.length === 1 ? "" : "s"}. A person must accept that trade-off or revise the plan.`
+        : audit?.reversed
       ? `Provisional: ${audit.reversed} evidence stress test${audit.reversed === 1 ? "" : "s"} selected a different finalist; a person should review it before relying on it.`
       : v.stable && audit?.robust
         ? `Stable: all ${audit.completed} recorded stability checks preserved the recommendation.`
