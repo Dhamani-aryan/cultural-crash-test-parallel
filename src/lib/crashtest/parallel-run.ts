@@ -693,12 +693,12 @@ function finalVerdict(x: {
   if (fin.verdict === "insufficient_evidence")
     humanChecks.push(`No plan can be recommended: ${fin.rationale}`);
   if (x.anchorSource === "model_hypothesis") humanChecks.push(x.anchorNotes[0]);
-  if (x.stability?.reversed) {
-    const anchors = x.stability.checks
-      .filter((c) => c.outcome === "reversed" && c.omittedAnchor)
-      .map((c) => c.omittedAnchor!.name);
+  const anchorReversals =
+    x.stability?.checks.filter((check) => check.outcome === "reversed" && check.kind === "anchor_dropout" && check.omittedAnchor) ?? [];
+  if (anchorReversals.length) {
+    const anchors = anchorReversals.map((check) => check.omittedAnchor!.name);
     humanChecks.push(
-      `The recommended plan changed in ${x.stability.reversed} evidence stress test${x.stability.reversed === 1 ? "" : "s"}${anchors.length ? ` when ${anchors.join(", ")} ${anchors.length === 1 ? "was" : "were"} withheld` : ""}. Confirm that the audience definition reflects the launch.`,
+      `The recommended plan changed when ${anchors.join(", ")} ${anchors.length === 1 ? "was" : "were"} withheld. Confirm that the audience definition reflects the launch.`,
     );
   }
   const states = chosen ? (matrix.componentStates[chosen.candidateId] ?? {}) : {};

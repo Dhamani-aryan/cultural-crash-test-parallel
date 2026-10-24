@@ -345,6 +345,7 @@ describe("parallel architecture: blind adjudication", () => {
     expect(p.final.verdict).toBe("unstable");
     expect(p.verdict).toMatchObject({ stable: false, decidedBy: "evidence_order" });
     expect(p.verdict.humanChecks.join(" ")).toMatch(/changed with the order/);
+    expect(p.verdict.humanChecks.join(" ")).not.toMatch(/audience definition/);
   });
 
   it("removes outcome claims the evidence can't show from a verdict", () => {
