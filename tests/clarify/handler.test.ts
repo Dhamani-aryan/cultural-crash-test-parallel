@@ -29,7 +29,8 @@ function world(over: Parameters<typeof worldLlm>[0] = {}) {
   return { deps, counter };
 }
 
-const AMBIGUOUS = { ...LONDON_BRIEF, sourceText: "A pop-up in Shoreditch with live screen printing." };
+// Two explicit instructions that contradict: one of the few questions P2.1 still asks.
+const AMBIGUOUS = { ...LONDON_BRIEF, sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine." };
 
 describe("clarification through the run endpoint", () => {
   afterEach(() => {
@@ -97,7 +98,7 @@ describe("clarification through the run endpoint", () => {
     const req = first(await events(await handleCrashTest(post({ brief: AMBIGUOUS, clarify: true }), w.deps, () => cache)), "clarification_required")!;
     const ran = await events(await handleCrashTest(post({ clarification: { sessionId: req.session.sessionId, answers: [{ message: "I don't know, decide for me" }] } }), w.deps, () => cache));
     expect(first(ran, "clarification_applied")!.acknowledgement).toMatch(/^I'll decide:/);
-    expect(done(ran).assumptions).toContain("Clarification: Shoreditch is treated as preferred, not mandatory; a venue elsewhere is flagged if it wins.");
+    expect(done(ran).assumptions).toContain("Clarification: Shoreditch is preferred, not required; a venue elsewhere is flagged if it wins.");
   });
 
   it("rejects unknown sessions, unknown questions and options, and malformed requests", async () => {

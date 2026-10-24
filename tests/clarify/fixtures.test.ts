@@ -70,7 +70,9 @@ describe("the frozen clarification fixtures", () => {
       // No asked question, deterministic or proposed, names anything the brief and the city don't.
       const m = marketById(f.brief.marketId)!;
       const allowed = [f.brief.sourceText ?? "", f.brief.launchGoal, ...(f.brief.existingChoices ?? []).map((c) => c.name), ...(f.identities ?? []).map((i) => `${i.expectedCountry} ${i.qlooDescription}`), m.label, m.qlooLocation, ...(m.locationAliases ?? [])].join(" ");
-      expect(foreignNames(r.questions.flatMap((x) => [x.prompt, ...x.options.map((o) => o.label)]), allowed)).toEqual([]);
+      // The question itself names nothing the brief and the city don't; its readings never name a candidate (P2.1).
+      expect(foreignNames(r.questions.map((x) => x.prompt), allowed)).toEqual([]);
+      for (const n of f.forbiddenNames ?? []) expect(questionText(r)).not.toContain(n);
       // The model is never shown candidate names.
       for (const n of f.forbiddenNames ?? []) for (const p of prompts) expect(p).not.toContain(n);
       for (const want of f.expect.resolutions ?? []) expect(r.resolutions.flatMap((x) => x.patches)).toContainEqual(want);
@@ -97,4 +99,5 @@ describe("the frozen clarification fixtures", () => {
 });
 
 /** The fixtures' fingerprint as written (draft, before human review). */
-const FIXTURE_FINGERPRINT = "d252961556cb6512";
+// P2.1 revision (was d252961556cb6512 in P0); still a draft until a person reviews it.
+const FIXTURE_FINGERPRINT = "937bb23a3f9805ad";

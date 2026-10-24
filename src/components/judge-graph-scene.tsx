@@ -5,7 +5,8 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber"
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { KIND_LABEL, RELATION_LABEL, visibleGraph, type JudgeGraph, type JudgeGraphEdge, type JudgeGraphNode } from "@/lib/crashtest/judge-graph";
-import { NODE_RADIUS, type GraphLayout, type RoutedEdge } from "@/lib/crashtest/judge-layout";
+import { chooseLabelSpot, type Rect } from "@/lib/crashtest/judge-labels";
+import { FIT_PADDING, MIN_GUTTER, NODE_RADIUS, fitCamera, type GraphLayout, type RoutedEdge } from "@/lib/crashtest/judge-layout";
 import { replayTimes, type ReplayTimeline } from "@/lib/crashtest/judge-replay";
 import { SLOT_LABEL, type Slot } from "@/lib/crashtest/types";
 
@@ -86,7 +87,7 @@ function useVisuals({ graph, layout, focus, selected }: SceneProps, hover: strin
           {
             inView: inView.has(n.id),
             opacity,
-            label: inView.has(n.id) && (!focus || active || n.id === "plan" || n.id === "brief"),
+            label: inView.has(n.id),
             kicker: focus ? "" : n.kind === "final_choice" ? SLOT_LABEL[n.slot!] : KIND_LABEL[n.kind],
             priority,
           },
@@ -247,6 +248,9 @@ function EdgeLine({
     if (route && p > 0) {
       const c = choice.get(e.id);
       const pts = livePoints(route, c?.alt ?? 0, e, layout, disp);
+      // Unused segments sit on the route's own start, under the drawn line: left at the origin, a
+      // zero-length segment of a wide line shows as a stray dot in the middle of the graph.
+      if (pts[0]) for (let k = 0; k < flat.length; k += 3) flat.splice(k, 3, pts[0].x, pts[0].y, pts[0].z);
       const drawn = p * (pts.length - 1);
       for (let k = 0; k < pts.length - 1 && k < MAX_POINTS - 1; k++) {
         if (k >= drawn || c?.hidden.has(k)) continue;
@@ -274,25 +278,45 @@ function EdgeLine({
   );
 }
 
-/** Frames the active path, or the selected node, in under half a second. */
-function Rig({ layout, fitKey, reduced, selected }: { layout: GraphLayout; fitKey: number; reduced: boolean; selected: string | null }) {
+/**
+ * Frames every rendered node and its label (fitCamera), or brings a selected node closer while its
+ * circle and full label stay inside, in under half a second. Refits on resize, focus change, replay
+ * reset, "Fit graph" and once the label font has loaded.
+ */
+function Rig({ layout, fitKey, reduced, selected, replayStart }: { layout: GraphLayout; fitKey: number; reduced: boolean; selected: string | null; replayStart: number | null }) {
   const { camera, size } = useThree();
   const controls = useThree((s) => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | null;
   const anim = useRef<{ t0: number; fromP: THREE.Vector3; toP: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3 } | null>(null);
-  const at = selected ? layout.positions[selected] : undefined;
+  const [fontsReady, setFontsReady] = useState(0);
   useEffect(() => {
-    if (!controls) return;
-    const persp = camera as THREE.PerspectiveCamera;
-    const half = THREE.MathUtils.degToRad(persp.fov / 2);
-    const aspect = size.width / Math.max(size.height, 1);
-    // A selected node is brought closer, with its neighbours still in view.
-    const [w, h] = at ? [8, 5] : layout.size;
-    const d = Math.max(h / 2 / Math.tan(half), w / 2 / (Math.tan(half) * aspect)) + 1.2;
-    const toT = new THREE.Vector3(...(at ?? layout.center));
+    let live = true;
+    document.fonts?.ready.then(() => live && setFontsReady((n) => n + 1));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const replaying = replayStart !== null;
+  useEffect(() => {
+    if (!controls || !size.width || !size.height) return;
+    const fov = (camera as THREE.PerspectiveCamera).fov;
+    const view = { width: size.width, height: size.height };
+    const whole = fitCamera(layout.fit, view, fov);
+    let target = whole.target;
+    let d = whole.distance;
+    const own = selected ? layout.fit.find((f) => f.id === selected) : undefined;
+    if (own) {
+      // Closer on the selected node, but never so close that its circle or label leaves the canvas.
+      const half = THREE.MathUtils.degToRad(fov / 2);
+      const near = Math.max(5 / 2 / Math.tan(half), 8 / 2 / (Math.tan(half) * (view.width / view.height))) + 1.2;
+      const alone = fitCamera([own], view, fov);
+      d = Math.min(whole.distance, Math.max(near, alone.distance));
+      target = alone.target;
+    }
+    const toT = new THREE.Vector3(...target);
     // Straight on: the routes and labels were laid out for this view.
     const toP = toT.clone().add(new THREE.Vector3(0, 0, d));
     anim.current = { t0: performance.now(), fromP: camera.position.clone(), toP, fromT: controls.target.clone(), toT };
-  }, [layout, fitKey, controls, camera, size.width, size.height, at]);
+  }, [layout, fitKey, controls, camera, size.width, size.height, selected, fontsReady, replaying]);
   useFrame(() => {
     const a = anim.current;
     if (!a || !controls) return;
@@ -375,14 +399,13 @@ function Scene(props: SceneProps & { visuals: Visuals; onFrame: FrameHook; onHov
       {graph.nodes.map((n) => (
         <NodeMesh key={n.id} n={n} disp={disp} vis={vis} selected={selected === n.id} onSelect={onSelect} onHover={onHover} />
       ))}
-      <Rig layout={layout} fitKey={fitKey} reduced={reduced} selected={selected} />
+      <Rig layout={layout} fitKey={fitKey} reduced={reduced} selected={selected} replayStart={replayStart} />
       <OrbitControls makeDefault enablePan={false} enableDamping minDistance={4} maxDistance={34} />
     </>
   );
 }
 
 const PAD = 12;
-type Rect = { x: number; y: number; w: number; h: number };
 /** Does the segment p→q pass through rectangle r (with a hair of padding)? */
 function segmentHits(p: { x: number; y: number }, q: { x: number; y: number }, r: Rect): boolean {
   const [x0, y0, x1, y1] = [r.x - 2, r.y - 2, r.x + r.w + 2, r.y + r.h + 2];
@@ -406,7 +429,6 @@ function segmentHits(p: { x: number; y: number }, q: { x: number; y: number }, r
   }
   return true;
 }
-const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w + 4 && b.x < a.x + a.w + 4 && a.y < b.y + b.h + 2 && b.y < a.y + a.h + 2;
 
 export default function JudgeGraphScene(props: SceneProps & { onMiss: () => void }) {
   const { onMiss, ...scene } = props;
@@ -450,7 +472,8 @@ export default function JudgeGraphScene(props: SceneProps & { onMiss: () => void
       jobs.push({ key, el, priority: isEdge ? 9 : visuals.nodes.get(key)!.priority, node: !isEdge });
     }
     jobs.sort((a, b) => a.priority - b.priority);
-    const inside = (r: Rect) => r.x >= PAD && r.y >= PAD && r.x + r.w <= width - PAD && r.y + r.h <= height - PAD;
+    // The same safe margin the camera fit keeps, so a label never sits under the canvas edge.
+    const pad = Math.max(PAD, Math.min(width * FIT_PADDING, MIN_GUTTER));
     for (const j of jobs) {
       const w = j.el.offsetWidth;
       const h = j.el.offsetHeight;
@@ -462,12 +485,20 @@ export default function JudgeGraphScene(props: SceneProps & { onMiss: () => void
         const above = { x: d.x - w / 2, y: d.y - gap - h, w, h };
         const below = { x: d.x - w / 2, y: d.y + gap, w, h };
         // Overview anchors are fixed so the picture is stable; focused labels go above in the lower part.
-        if (!scene.focus && j.key === "brief") spots.push({ x: d.x - gap - w - 2, y: d.y - h / 2, w, h }, above, below);
-        else if (!scene.focus && j.key === "plan") spots.push({ x: d.x + gap + 2, y: d.y - h / 2, w, h }, above, below);
+        const wide = !scene.focus && !scene.layout.narrow;
+        if (wide && j.key === "brief") spots.push({ x: d.x - gap - w - 2, y: d.y - h / 2, w, h }, above, below);
+        else if (wide && j.key === "plan") spots.push({ x: d.x + gap + 2, y: d.y - h / 2, w, h }, above, below);
+        else if (scene.layout.narrow && (j.key === "brief" || j.key === "plan")) spots.push(...(j.key === "brief" ? [above, below] : [below, above]));
         else if (!scene.focus && kindOf.get(j.key) === "final_choice") spots.push(...(home && home[1] > 0 ? [above, below] : [below, above]));
         else spots.push(...(d.y > height * 0.62 ? [above, below] : [below, above]));
-        // Then the same spots nudged sideways, before giving up.
+        // Then the same spots nudged sideways, then beside the node, then a label-height further
+        // out, before moving it inward over something (a node label is never hidden).
         for (const s0 of [...spots]) spots.push({ ...s0, x: s0.x + w / 2 + 8 }, { ...s0, x: s0.x - w / 2 - 8 });
+        spots.push({ x: d.x + gap + 2, y: d.y - h / 2, w, h }, { x: d.x - gap - w - 2, y: d.y - h / 2, w, h });
+        for (const s0 of [below, above]) {
+          const out = s0 === below ? h + 4 : -(h + 4);
+          for (const dx of [0, w / 2 + 8, -(w / 2 + 8)]) spots.push({ ...s0, x: s0.x + dx, y: s0.y + out });
+        }
       } else {
         const e = scene.graph.edges.find((x) => x.id === j.key.slice(5));
         const route = e && scene.layout.routes[e.id];
@@ -476,7 +507,7 @@ export default function JudgeGraphScene(props: SceneProps & { onMiss: () => void
         const m = project(pts[Math.floor(pts.length / 2)]);
         spots.push({ x: m.x - w / 2, y: m.y - h / 2, w, h });
       }
-      const spot = spots.find((r) => inside(r) && !placed.some((p) => overlaps(p, r)));
+      const spot = chooseLabelSpot({ spots, placed, node: j.node, width, height, pad });
       if (!spot) {
         j.el.style.visibility = "hidden";
         continue;
@@ -526,7 +557,7 @@ export default function JudgeGraphScene(props: SceneProps & { onMiss: () => void
               style={{ visibility: "hidden", opacity: v.opacity < 0.5 ? 0.55 : 1 }}
             >
               {v.kicker && <div className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-white/45">{v.kicker}</div>}
-              <div className={`text-[11px] font-medium ${scene.selected === n.id ? "text-white" : "text-white/90"}`}>{n.label.length > 30 ? `${n.label.slice(0, 29)}…` : n.label}</div>
+              <div className={`text-[11px] font-medium ${scene.selected === n.id ? "text-white" : "line-clamp-2 text-white/90"}`}>{n.label}</div>
             </div>
           );
         })}

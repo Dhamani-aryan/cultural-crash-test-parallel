@@ -124,12 +124,15 @@ export function questionsFor(state: IntakeState): {
   return { lines, chips, asks };
 }
 
-/** The brief in a few lines, so the user can check it before the run. */
+/** What the assistant says once the brief is complete; the run starts with it. */
+export const READY_LINE = "I have enough to test the plan.";
+
+/** The brief in a few lines, shown for transparency as the run starts (not a second confirmation). */
 export function summaryText(state: IntakeState): string {
   const b = state.brief;
   const city = marketById(b.marketId)?.label ?? b.marketId;
   const lines = [
-    `Brief ready for review:`,
+    `Here’s the brief I’ll test:`,
     `• ${b.brandName ? `${b.brandName}: ` : ""}${b.productCategory}${b.launchGoal ? `, ${b.launchGoal}` : ""}, in ${city}`,
     `• For: ${b.audienceDescription}${b.audienceAnchors.length ? ` (fans of ${b.audienceAnchors.join(", ")})` : ""}`,
   ];
@@ -142,7 +145,6 @@ export function summaryText(state: IntakeState): string {
     lines.push(`• Rules: ${[...b.exclude.map((x) => `no ${x}`), ...b.otherRules].join("; ")}`);
   if (state.assumptions.length)
     lines.push(`• I assumed: ${state.assumptions.map((x) => x.replace(/\.$/, "")).join("; ")}.`);
-  lines.push("", "Confirm the brief to begin, or tell me what to change.");
   return lines.join("\n");
 }
 
@@ -156,8 +158,10 @@ export function respond(
     ? "I can't open websites here, so I haven't read that one. Paste any About, product or campaign copy that helps. "
     : "";
   if (!s.missingCriticalFields.length) {
-    s = say(s, "assistant", prefix + summaryText(s));
-    return { ...s, chips: [{ label: "Generate recommendations", action: "confirm" }] };
+    // A complete brief runs: the summary is for transparency, and the clarification gate is the only
+    // further check (it asks only what the user alone can answer).
+    s = say(s, "assistant", `${prefix}${summaryText(s)}\n\n${READY_LINE}`);
+    return refresh({ ...s, confirmed: true, chips: [] });
   }
   if (s.clarificationTurns >= MAX_CLARIFICATION_TURNS) {
     s = say(
@@ -212,6 +216,12 @@ async function fillTheRest(llm: LlmClient, state: IntakeState): Promise<IntakeSt
   };
 }
 
+/** A reply that starts the run exactly when the assistant has just said the brief is complete. */
+const replied = (state: IntakeState): IntakeReply => {
+  const last = state.messages.at(-1);
+  return { state, startRequested: state.readyToRun && last?.role === "assistant" && last.text.endsWith(READY_LINE) };
+};
+
 export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise<IntakeReply> {
   const req = IntakeRequestSchema.parse(input);
   // The client's state is data, not truth: re-parse it and recompute everything derived.
@@ -231,12 +241,12 @@ export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise
     case "confirm": {
       state = refresh(state);
       if (state.missingCriticalFields.length)
-        return { state: respond(state), startRequested: false };
+        return replied(respond(state));
       // The summary the user just saw is the review; confirming starts the run.
       state = refresh({ ...state, confirmed: true });
       return {
         state: {
-          ...say(state, "assistant", "Brief locked. Running the cultural test…"),
+          ...say(state, "assistant", READY_LINE),
           chips: [],
         },
         startRequested: true,
@@ -254,7 +264,7 @@ export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise
       for (const k of Object.keys(patch)) origins[k] = "user_confirmed";
       state = { ...state, brief: { ...state.brief, ...patch }, origins, confirmed: false };
       // A chat answer (a city chip, say) gets a reply like any other turn.
-      return { state: respond(state), startRequested: false };
+      return replied(respond(state));
     }
 
     case "explore_audience": {
@@ -282,7 +292,7 @@ export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise
 
     case "select_audience": {
       const h = state.audienceHypotheses.find((x) => x.id === req.hypothesisId);
-      if (!h) return { state: respond(state), startRequested: false };
+      if (!h) return replied(respond(state));
       const origins: IntakeState["origins"] = {
         ...state.origins,
         audienceDescription: "user_confirmed",
@@ -306,12 +316,12 @@ export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise
           ...h.assumptions.map((a) => `Audience idea "${h.label}": ${a}`),
         ].slice(0, 12),
       };
-      return { state: respond(state), startRequested: false };
+      return replied(respond(state));
     }
 
     case "message": {
       const text = (req.message ?? "").trim();
-      if (!text) return { state: respond(state), startRequested: false };
+      if (!text) return replied(respond(state));
       if (state.messages.length >= MAX_MESSAGES * 2) {
         state = say(
           state,
@@ -330,13 +340,13 @@ export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise
           const go = refresh({ ...r, confirmed: true });
           return {
             state: {
-              ...say(go, "assistant", "Brief locked. Running the cultural test…"),
+              ...say(go, "assistant", READY_LINE),
               chips: [],
             },
             startRequested: true,
           };
         }
-        if (!r.missingCriticalFields.length) return { state: respond(r), startRequested: false };
+        if (!r.missingCriticalFields.length) return replied(respond(r));
         const why = `Not yet: I still need ${r.missingCriticalFields.map((f) => MISSING_LABEL[f].toLowerCase()).join("; ")}. Or say "figure out the rest".`;
         return {
           state: { ...say(r, "assistant", why), chips: questionsFor(r).chips },
@@ -388,10 +398,7 @@ export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise
         confirmed: merged.changed.length ? false : state.confirmed,
       };
       if (DELEGATE.test(text)) state = await fillTheRest(llm, state);
-      return {
-        state: respond(state, { websiteJustGiven: merged.changed.includes("website") }),
-        startRequested: false,
-      };
+      return replied(respond(state, { websiteJustGiven: merged.changed.includes("website") }));
     }
   }
 }

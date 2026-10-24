@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { answerPatches } from "@/lib/clarify/gate";
 import { interpretText } from "@/lib/clarify/interpret";
 import { applyPatches } from "@/lib/clarify/patch";
 import { answerSession, clarifiedContract, SessionError, startSession, type ClarifyEvent, type Session } from "@/lib/clarify/session";
@@ -27,7 +28,7 @@ describe("a clear brief", () => {
     expect(of(events, "clarification_required")).toEqual([]);
     expect(events.map((e) => e.type)).toEqual(["assistant_message", "ready"]);
     // What the brief settles, in plain words: no cue words quoted, no internal terms.
-    expect(of(events, "assistant_message")[0].text).toBe("I have enough to work with. I’ll keep Yard Market, treat Grey Lane as one option to test and aim for Shoreditch or nearby.");
+    expect(of(events, "assistant_message")[0].text).toBe("I’ll keep Yard Market, treat Grey Lane as one option to test and aim for Shoreditch or nearby.");
     expect(session.state).toBe("ready");
     // "Booked" became a machine-checked lock without asking; "hoping" and "around" are recorded.
     expect(rules(session)).toEqual([
@@ -45,14 +46,15 @@ describe("a clear brief", () => {
 });
 
 describe("one material question", () => {
-  const ambiguous = () => startSession(brief("A pop-up in Shoreditch with live screen printing."), deps());
+  // Two explicit instructions that contradict: one of the few questions P2.1 still asks.
+  const ambiguous = () => startSession(brief("The pop-up must be in Shoreditch, though anywhere in London is fine."), deps());
 
   it("asks it with a public question that carries no patches", async () => {
     const { session, events } = await ambiguous();
     const req = of(events, "clarification_required")[0];
     expect(session).toMatchObject({ state: "awaiting_clarification", turnsUsed: 1, questionsAsked: 1 });
     expect(req.questions).toHaveLength(1);
-    expect(req.questions[0]).toMatchObject({ reason: "geography", allowCustom: true, allowDelegate: true });
+    expect(req.questions[0]).toMatchObject({ reason: "conflict", allowCustom: true, allowDelegate: true });
     expect(JSON.stringify(req.questions)).not.toContain("patches");
     expect(req.session).toMatchObject({ maxTurns: CLARIFY_BUDGET.maxTurns, maxQuestions: CLARIFY_BUDGET.maxQuestions });
   });
@@ -69,7 +71,15 @@ describe("one material question", () => {
 
   it("reads a typed message as the answer, keeps an unrelated one from answering, and records a custom one", async () => {
     const typed = await ambiguous();
-    const q = question(typed.session);
+    // Reading typed answers, on a three-option question built by hand (the gate rarely asks one now).
+    const asked = question(typed.session);
+    const option = (id: string, label: string) => ({ id, label, value: label, consequence: "", patches: [] });
+    const q = {
+      ...asked,
+      prompt: "How strict is the Shoreditch location?",
+      sourcePhrases: ["A pop-up in Shoreditch"],
+      options: [option("a", "It must be in Shoreditch"), option("b", "Nearby is acceptable"), option("c", "Anywhere in London is acceptable")],
+    };
     expect(interpretText(q, "It has to be in Shoreditch")).toEqual({ kind: "option", optionId: q.options[0].id });
     expect(interpretText(q, "Nearby is fine")).toEqual({ kind: "option", optionId: q.options[1].id });
     expect(interpretText(q, "anywhere but Shoreditch itself")).toMatchObject({ kind: "custom" });
@@ -83,6 +93,7 @@ describe("one material question", () => {
     expect(interpretText(q, "How long does a run take?")).toEqual({ kind: "unrelated" });
     expect(interpretText(q, "I'm not sure, use your judgement")).toEqual({ kind: "delegate" });
 
+    expect(interpretText(asked, "It has to be in Shoreditch")).toEqual({ kind: "option", optionId: asked.options[0].id });
     const answered = await answerSession(typed.session, [{ message: "It has to be in Shoreditch" }], deps());
     expect(rules(answered.session)).toContain("hard: The venue must be in Shoreditch");
 
@@ -93,17 +104,19 @@ describe("one material question", () => {
     expect(off.session).toEqual(before);
 
     const custom = await ambiguous();
-    const c = await answerSession(custom.session, [{ message: "We would like a courtyard space, ideally in Shoreditch" }], deps());
+    const c = await answerSession(custom.session, [{ message: "A courtyard space would be ideal, anywhere east" }], deps());
     expect(c.session.state).toBe("ready");
-    expect(c.session.assumptions.join(" ")).toContain("We would like a courtyard space, ideally in Shoreditch");
+    expect(c.session.assumptions.join(" ")).toContain("A courtyard space would be ideal, anywhere east");
   });
 
   it("'Decide for me' records the declared assumption and proceeds", async () => {
     const { session } = await ambiguous();
     const out = await answerSession(session, [{ questionId: question(session).id, delegated: true }], deps());
     expect(out.session.state).toBe("ready");
-    expect(of(out.events, "clarification_applied")[0].acknowledgement).toMatch(/^I'll decide: Shoreditch is treated as preferred, not mandatory/);
-    expect(of(out.events, "ready")[0].assumptions).toContain("Shoreditch is treated as preferred, not mandatory; a venue elsewhere is flagged if it wins.");
+    expect(of(out.events, "clarification_applied")[0].acknowledgement).toMatch(/^I'll decide: Shoreditch is preferred, not required/);
+    expect(of(out.events, "ready")[0].assumptions).toContain("Shoreditch is preferred, not required; a venue elsewhere is flagged if it wins.");
+    // A delegated contradiction leaves the result provisional.
+    expect(of(out.events, "ready")[0].provisional).toContain("Shoreditch is preferred, not required; a venue elsewhere is flagged if it wins.");
     expect(rules(out.session)).toContain("soft: A venue in or near Shoreditch is preferred; elsewhere is acceptable if it is clearly stronger");
   });
 
@@ -130,27 +143,30 @@ describe("one material question", () => {
 
 describe("the budget across turns", () => {
   it("asks at most two turns and three questions, then applies defaults and concludes", async () => {
-    // Four material uncertainties: a conflict, a namesake, an act's strength and the area.
-    const b = brief("We've booked Yard Market for a pop-up in Shoreditch, but please find a better venue if you can. We'd like Big Tex to perform.", {
+    // Three askable decisions: the area contradiction, a brand named and excluded, and a namesake.
+    const b = brief("The pop-up must be in Shoreditch, though anywhere in London is fine. We plan to collaborate with Mossgrove. Never use Mossgrove. We'd like Big Tex to perform.", {
       existingChoices: [
-        { slot: "event_place", name: "Yard Market" },
+        { slot: "brand_collaboration", name: "Mossgrove" },
         { slot: "artist_music", name: "Big Tex" },
       ],
+      constraints: [{ id: "x", description: "Never use Mossgrove", kind: "hard", excludeNames: ["Mossgrove"] }],
     });
     const d = deps({ choiceCountry: "India" });
     const t1 = await startSession(b, d);
-    expect(question(t1.session).reason).toBe("conflict");
-    const t2 = await answerSession(t1.session, [{ questionId: question(t1.session).id, selectedOptionIds: [question(t1.session).options[0].id] }], d);
+    // Both contradictions come first; the one that changes eligibility and a constraint leads.
+    expect(question(t1.session).id).toBe("conflict:named-and-excluded:brand_collaboration");
+    const t2 = await answerSession(t1.session, [{ questionId: question(t1.session).id, selectedOptionIds: [question(t1.session).options[1].id] }], d);
     expect(t2.session.state).toBe("awaiting_clarification");
-    expect(question(t2.session).reason).toBe("entity_identity");
+    expect(question(t2.session).id).toBe("conflict:neighbourhood-vs-anywhere");
     const t3 = await answerSession(t2.session, [{ questionId: question(t2.session).id, delegated: true }], d);
-    // No third turn: the rest is assumed, recorded, and the run can start.
+    // No third turn: the namesake is assumed unresolved and recorded, and the run can start.
     expect(t3.session).toMatchObject({ state: "ready", turnsUsed: 2, questionsAsked: 2 });
-    expect(t3.session.assumptions.join(" ")).toMatch(/Big Tex is treated as preferred, not fixed/);
-    expect(t3.session.assumptions.join(" ")).toMatch(/Shoreditch is treated as preferred/);
-    // The delegated identity stays open: the result will be provisional.
+    expect(t3.session.assumptions.join(" ")).toMatch(/Shoreditch is preferred, not required/);
+    expect(t3.session.assumptions.join(" ")).toMatch(/"Big Tex" stays unresolved/);
+    // The delegated identity and contradiction stay open: the result will be provisional.
     expect(t3.session.provisional.join(" ")).toMatch(/Big Tex/);
-    expect(rules(t3.session)).toContain("hard: Keep the pop-up venue: Yard Market [lock event_place]");
+    expect(rules(t3.session)).toContain("soft: A venue in or near Shoreditch is preferred; elsewhere is acceptable if it is clearly stronger");
+    expect(t3.session.brief.existingChoices?.map((c) => c.name)).not.toContain("Mossgrove");
     expect(t3.session.asked.length).toBeLessThanOrEqual(CLARIFY_BUDGET.maxQuestions);
   });
 });
@@ -162,7 +178,7 @@ describe("the model", () => {
     expect(of(events, "ready")[0].assumptions.join(" ")).toMatch(/clarification model was unavailable/);
   });
 
-  it("a multi-choice question takes several answers as several patches", async () => {
+  it("a 'local' meaning question is dropped (the agent's work); a multi-choice answer still gives one patch per option", async () => {
     const clarify = {
       proposals: [
         {
@@ -186,10 +202,27 @@ describe("the model", () => {
       ],
     };
     const { session } = await startSession(brief("A pop-up for our streetwear label with a local brand partner."), deps({ clarify }));
-    const q = question(session);
-    expect(q.inputKind).toBe("multi_choice");
-    const out = await answerSession(session, [{ questionId: q.id, selectedOptionIds: [q.options[0].id, q.options[1].id] }], deps({ clarify }));
-    expect(rules(out.session)).toEqual(expect.arrayContaining(["hard: Required: Founded in the city", "hard: Required: Independent rather than global"]));
+    expect(session.state).toBe("ready");
+    // The answer path for several options, on a hand-built checkbox question.
+    const q = {
+      id: "q",
+      reason: "rule_meaning" as const,
+      prompt: "Which of these must the partner be?",
+      inputKind: "multi_choice" as const,
+      options: [
+        { id: "q#1", label: "Founded in the city", value: "", consequence: "", patches: [{ kind: "quality" as const, quality: "Founded in the city", polarity: "required" as const }] },
+        { id: "q#2", label: "Independent rather than global", value: "", consequence: "", patches: [{ kind: "quality" as const, quality: "Independent rather than global", polarity: "required" as const }] },
+      ],
+      allowCustom: true as const,
+      allowDelegate: true as const,
+      affectedSlots: [],
+      sourcePhrases: [],
+      materialEffect: "",
+      delegatedAssumption: "",
+      delegatedPatches: [],
+      delegationIsProvisional: false,
+    };
+    expect(answerPatches(q, { questionId: "q", selectedOptionIds: ["q#1", "q#2"], delegated: false, answeredAt: "t" })).toMatchObject({ ok: true, patches: [q.options[0].patches[0], q.options[1].patches[0]] });
   });
 });
 

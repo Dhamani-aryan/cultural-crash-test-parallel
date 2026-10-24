@@ -373,7 +373,7 @@ export function ChatApp() {
                 <div ref={end} />
               </div>
             </main>
-            {(!started || (awaiting && view.clarify.recovery?.action !== "restart")) && (
+            {(!started || view.phase === "error" || (awaiting && view.clarify.recovery?.action !== "restart")) && (
               <div className="shrink-0 bg-gradient-to-t from-bg via-bg to-transparent px-4 pb-6 pt-5">
                 <div className="mx-auto w-full max-w-[880px]">
                   {awaiting ? <Composer key="reply" onSend={reply} busy={busy} placeholder="Reply…" autoFocus /> : <Composer key="brief" onSend={send} busy={busy} />}

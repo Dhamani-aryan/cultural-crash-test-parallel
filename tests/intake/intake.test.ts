@@ -66,17 +66,19 @@ const lastAssistant = (s: IntakeState) =>
   [...s.messages].reverse().find((m) => m.role === "assistant")!.text;
 
 describe("intake", () => {
-  it("turns a complete description into a summary, and runs only once the user says go", async () => {
+  it("turns a complete description into a summary and starts the run, without a second confirmation (P2.1)", async () => {
     const { llm } = fakeLlm(fullFacts);
     const r1 = await applyIntake(llm, { action: "message", message: FULL, marketId: "london" });
     expect(r1.state.missingCriticalFields).toEqual([]);
-    expect(r1.state.readyToRun).toBe(false);
-    expect(r1.startRequested).toBe(false);
-    expect(lastAssistant(r1.state)).toMatch(/Brief ready for review/);
-    expect(r1.state.chips).toEqual([{ label: "Generate recommendations", action: "confirm" }]);
+    expect(r1.state.readyToRun).toBe(true);
+    expect(r1.startRequested).toBe(true);
+    expect(lastAssistant(r1.state)).toMatch(/^Here’s the brief I’ll test:[\s\S]*I have enough to test the plan\.$/);
+    expect(lastAssistant(r1.state)).not.toMatch(/Confirm the brief|Brief locked/);
+    expect(r1.state.chips).toEqual([]);
+    // An explicit confirm (an example brief's chip) still starts it, with the same neutral words.
     const r2 = await applyIntake(llm, { action: "confirm", state: r1.state });
-    expect(r2.state.readyToRun).toBe(true);
     expect(r2.startRequested).toBe(true);
+    expect(lastAssistant(r2.state)).toBe("I have enough to test the plan.");
   });
 
   it("asks only for what's genuinely missing", async () => {
@@ -388,7 +390,8 @@ describe("intake", () => {
       patch: { exploreUserChoices: true },
       state: r.state,
     });
-    expect(on.state.confirmed).toBe(false);
+    // An edit that leaves the brief complete summarises it again and runs it (P2.1: no second confirmation).
+    expect(on.startRequested).toBe(true);
     expect(LaunchBriefSchema.parse(toLaunchBrief(on.state)).exploreUserChoices).toBe(true);
   });
 

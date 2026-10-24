@@ -69,13 +69,19 @@ const proposalSchema = z.object({
         identityRisk: z.boolean().describe("could proceeding silently pick the wrong real-world person, brand or place?"),
         safeDefault: z.string().describe("the reasonable assumption if the user says 'decide for me'"),
         prompt: z.string().describe("the concise question to ask, without naming any brand, act or venue the brief doesn't name"),
+        ruleIsMandatory: z.boolean().optional().describe("true only when the cited words are an explicitly mandatory rule (must, only, never, required)"),
+        mutuallyExclusive: z.boolean().optional().describe("true only when the readings exclude each other"),
+        conservativeReading: z.string().optional().describe("a reading that keeps the rule safe under every interpretation, or an empty string when none exists"),
       }),
     )
     .max(3),
 });
 
 export const CLARIFY_SYSTEM =
-  "You review a product-launch brief for decisions only the user can settle before a plan is made. Propose a question only when two readings of the brief would change which choices are eligible, what is fixed or ruled out, what kind of event or venue is needed, or which real-world entity is meant. Copy the exact brief words that create each uncertainty. Never ask about capacity, availability, budget, demographics, evidence or data, and never suggest or name a brand, act or venue the brief doesn't name. If nothing material is open, return no proposals.";
+  "You review a product-launch brief for the rare fact only the user can supply before a plan is made. The plan's strategic, cultural and aesthetic fit (whether choices suit the brand or audience, are too mainstream or niche, or could be bettered) is the planner's job: never ask about it. Propose a question only for an explicitly mandatory rule whose words have two mutually exclusive readings that make different choices eligible, when no conservative reading keeps the rule safe; give that conservative reading when one exists. Copy the exact brief words. Never ask about capacity, availability, budget, demographics, evidence or data, and never suggest or name a brand, act or venue the brief doesn't name. Usually, return no proposals.";
+
+/** Words that make a rule explicitly mandatory. */
+const MANDATORY = /\b(must|only|never|no|required|mandatory|cannot|can'?t|always|non-negotiable|has to|have to)\b/i;
 
 function proposalPrompt(brief: LaunchBrief, market: Market, known: Uncertainty[], remaining: number): string {
   const k = compileIntent(brief, market, { names: brief.audienceAnchors, source: brief.audienceAnchors.length ? "user" : "none" });
@@ -92,23 +98,20 @@ function proposalPrompt(brief: LaunchBrief, market: Market, known: Uncertainty[]
 
 /** Model proposals into uncertainties; reasons the deterministic checks own are left to them. */
 function fromModel(p: z.infer<typeof proposalSchema>["proposals"][number], i: number): Uncertainty | { dropped: string } {
+  // P2.1: only the meaning of an explicitly mandatory rule may be asked; everything else is the agent's work.
   if (["choice_strength", "event_format", "entity_identity"].includes(p.reason)) return { dropped: `${p.reason} is decided by the deterministic checks, not the model` };
-  const patch = (label: string, others: string[]): BriefPatch[] =>
-    p.reason === "rule_meaning"
-      ? [{ kind: "rule_meaning", rule: p.sourcePhrases[0] ?? "", meaning: label }]
-      : p.reason === "geography"
-        ? [{ kind: "quality", quality: label, polarity: "required" }]
-        : [{ kind: "priority", keep: label, over: others.join("; ") }];
+  if (p.reason !== "rule_meaning") return { dropped: "strategic, cultural and fit questions are the agent's work, not the user's" };
+  const patch = (label: string): BriefPatch[] => [{ kind: "rule_meaning", rule: p.sourcePhrases[0] ?? "", meaning: label }];
   return {
     id: `model:${p.reason}:${i}`,
     reason: p.reason,
     what: p.what,
     sourcePhrases: p.sourcePhrases,
     affectedSlots: p.affectedSlots,
-    interpretations: p.interpretations.map((x) => ({ ...x, patches: patch(x.label, p.interpretations.filter((y) => y !== x).map((y) => y.label)) })),
+    interpretations: p.interpretations.map((x) => ({ ...x, patches: patch(x.label) })),
     multi: p.multi,
-    effects: { eligibility: p.changesEligibility, constraintState: p.changesConstraint, eventRole: p.changesEventRole, winnerOrder: p.reason === "tradeoff", identity: p.identityRisk },
-    safeDefault: { assumption: p.safeDefault, patches: [{ kind: "assumption", text: p.safeDefault }], provisional: p.reason === "conflict" || p.reason === "rule_meaning" },
+    effects: { eligibility: p.changesEligibility, constraintState: p.changesConstraint, eventRole: p.changesEventRole, winnerOrder: false, identity: p.identityRisk },
+    safeDefault: { assumption: p.safeDefault, patches: [{ kind: "assumption", text: p.safeDefault }], provisional: true },
     origin: "model",
     confidence: "low",
     limitations: ["Proposed by the model; admitted only through the code filter."],
@@ -146,6 +149,7 @@ export async function runGate(input: GateInput): Promise<GateResult> {
   // The bounded model proposal, only while questions can still be asked.
   let generator: GateResult["generator"] = "skipped";
   const proposed: Uncertainty[] = [];
+  const conservativeAssumptions: { text: string; rule: string; meaning: string }[] = [];
   if (input.llm && canAsk) {
     try {
       const { data } = await generateStructured(input.llm, { schema: proposalSchema, system: CLARIFY_SYSTEM, prompt: proposalPrompt(brief, market, found.uncertainties, questionsLeft), label: "clarify:propose" });
@@ -163,9 +167,20 @@ export async function runGate(input: GateInput): Promise<GateResult> {
         if (texts.some((t) => NOT_AT_INTAKE.test(t))) return drop("asks about something that is a result-time check or not needed to proceed");
         const leaked = forbidden.filter((n) => texts.some((t) => norm(t).includes(n)));
         if (leaked.length) return drop(`names a candidate (${leaked.join(", ")})`);
-        const foreign = foreignNames(texts, allowed);
+        // The question itself names nothing the brief doesn't; the readings may name what each refers to.
+        const foreign = foreignNames([u.prompt, u.what], allowed);
         if (foreign.length) return drop(`names something the brief doesn't (${foreign.join(", ")})`);
         if (u.interpretations.length < 2) return drop("offers fewer than two readings");
+        // The strict rule-meaning conditions: an explicitly mandatory rule, readings that exclude each
+        // other and change eligibility, and no conservative reading that keeps the rule safe.
+        const hardRule = u.sourcePhrases.some((s) => brief.constraints.some((c) => c.kind === "hard" && norm(c.description).includes(norm(s))) || MANDATORY.test(s));
+        if (p.ruleIsMandatory !== true || !hardRule) return drop("the cited words aren't an explicitly mandatory rule");
+        if (p.mutuallyExclusive !== true || !p.changesEligibility) return drop("the readings don't exclude each other or don't change eligibility");
+        const conservative = (p.conservativeReading ?? "").trim();
+        if (conservative) {
+          conservativeAssumptions.push({ text: `"${u.sourcePhrases[0]}" is read conservatively: ${conservative}.`, rule: u.sourcePhrases[0], meaning: conservative });
+          return drop("a conservative reading keeps the rule safe");
+        }
         const dup = found.uncertainties.find((d) => d.reason === u.reason && d.affectedSlots.some((s) => u.affectedSlots.includes(s)));
         if (dup) return drop(`duplicates ${dup.id}`);
         proposed.push(u);
@@ -180,7 +195,8 @@ export async function runGate(input: GateInput): Promise<GateResult> {
   const assumptions: string[] = generator === "failed" ? ["The clarification model was unavailable; the run proceeds on what the brief says and the assumptions below."] : [];
   const provisional: string[] = [];
   const deferred: string[] = [];
-  const assumedPatches: BriefPatch[] = [];
+  const assumedPatches: BriefPatch[] = conservativeAssumptions.map((c) => ({ kind: "rule_meaning", rule: c.rule, meaning: c.meaning }));
+  assumptions.push(...conservativeAssumptions.map((c) => c.text));
   const assume = (u: Uncertainty, why: string, outcome: "assumed" | "dropped" = "assumed") => {
     assumptions.push(u.safeDefault.assumption);
     assumedPatches.push(...u.safeDefault.patches);

@@ -6,6 +6,10 @@ import type { LaunchBriefInput } from "../src/lib/crashtest/types";
  * quality). Written before any gate output was seen. Names are invented; none is one of the 15
  * evaluation scenarios, so nothing here tunes the recommendation runs.
  *
+ * P2.1 revision: clarification is rare. Fixtures that asked about neighbourhood strictness, choice
+ * strength, event format or a strategic tension now expect a deterministic resolution instead; the
+ * answer, budget and failure fixtures use questions that are still allowed.
+ *
  * REVIEW STATUS: draft, awaiting human review. Once reviewed, set REVIEWED_BY and REVIEWED_AT and
  * update the recorded fingerprint in tests/clarify/fixtures.test.ts; any later edit changes it.
  */
@@ -26,6 +30,9 @@ type Proposal = {
   identityRisk: boolean;
   safeDefault: string;
   prompt: string;
+  ruleIsMandatory?: boolean;
+  mutuallyExclusive?: boolean;
+  conservativeReading?: string;
 };
 export type GeneratorReply = { proposals: Proposal[] } | "fail";
 
@@ -163,69 +170,66 @@ export const FIXTURES: ClarificationFixture[] = [
     expect: { decision: "ready", resolutions: [{ kind: "choice_strength", slot: "event_place", name: "The Glass Room", strength: "locked" }] },
   },
 
-  // ---------- genuinely ambiguous: one question ----------
+  // ---------- settled by wording, never asked (P2.1) ----------
   {
-    id: "ambiguous-neighbourhood",
-    kind: "answer",
-    note: "A named neighbourhood with no strictness: one geography question; buttons, text and delegation each patch it.",
+    id: "neighbourhood-is-preference",
+    kind: "clear",
+    note: "A named neighbourhood without 'must' or 'only' is a preference, not a question.",
     brief: { ...base, marketId: "new-york", sourceText: "We're planning a pop-up on the Lower East Side with live screen printing and customisation." },
     generator: none,
-    expect: {
-      decision: "clarify",
-      reasons: ["geography"],
-      questionId: "geography:",
-      delegated: { assumption: "preferred, not mandatory", patches: [{ kind: "geography", place: "Lower East Side", strictness: "nearby" }], provisional: false },
-      answers: [
-        { options: [1], patches: [{ kind: "geography", place: "Lower East Side", strictness: "required" }] },
-        { options: [3], patches: [{ kind: "geography", place: "Lower East Side", strictness: "city" }] },
-        { text: "Anywhere downtown is fine", needsInterpretation: true },
-      ],
-    },
+    expect: { decision: "ready", resolutions: [{ kind: "geography", place: "Lower East Side", strictness: "nearby" }] },
   },
   {
-    id: "ambiguous-choice-strength",
-    kind: "ambiguous",
-    note: "A venue named with no firm or tentative wording: ask whether it is fixed.",
+    id: "ordinary-choice-is-preference",
+    kind: "clear",
+    note: "A venue named with no firm or tentative wording is preferred, not asked about.",
     brief: { ...base, marketId: "london", sourceText: "We'll launch at Juniper Hall with a DJ set and a pop-up shop.", existingChoices: [{ slot: "event_place", name: "Juniper Hall" }] },
     generator: none,
-    expect: {
-      decision: "clarify",
-      reasons: ["choice_strength"],
-      questionId: "strength:event_place",
-      delegated: { assumption: "preferred, not fixed", patches: [{ kind: "choice_strength", slot: "event_place", name: "Juniper Hall", strength: "preferred" }], provisional: false },
-      answers: [{ options: [1], patches: [{ kind: "choice_strength", slot: "event_place", name: "Juniper Hall", strength: "locked" }] }],
-    },
+    expect: { decision: "ready", resolutions: [{ kind: "choice_strength", slot: "event_place", name: "Juniper Hall", strength: "preferred" }] },
   },
   {
-    id: "ambiguous-event-format",
-    kind: "ambiguous",
-    note: "No format and no venue: the kind of event decides which places can host it.",
+    id: "missing-event-format",
+    kind: "clear",
+    note: "No format and no venue: general event spaces stay eligible, recorded as an assumption.",
     brief: { ...base, productCategory: "Fragrance", launchGoal: "Launch", marketId: "berlin", sourceText: "We're launching a fragrance and want it to feel experimental." },
     generator: none,
-    expect: { decision: "clarify", reasons: ["event_format"], questionId: "event-format", delegated: { assumption: "pop-up", patches: [{ kind: "event_format", format: "pop_up" }], provisional: false } },
+    expect: { decision: "ready", resolutions: [{ kind: "assumption", text: "The brief doesn't name an event format, so general event spaces are eligible." }] },
+  },
+  {
+    id: "booked-and-better",
+    kind: "clear",
+    note: "A booked venue and 'a better one if you can': the lock stands and alternatives are compared, without a question.",
+    brief: { ...base, marketId: "london", sourceText: "We've booked Juniper Hall for the pop-up, but please find a better venue if you can.", existingChoices: [{ slot: "event_place", name: "Juniper Hall" }] },
+    generator: none,
+    expect: { decision: "ready", resolutions: [{ kind: "choice_strength", slot: "event_place", name: "Juniper Hall", strength: "locked" }] },
+  },
+  {
+    id: "headline-vs-celebrity",
+    kind: "clear",
+    note: "A headline name and 'not celebrity-led' is a tension the comparison tests, not a question.",
+    brief: { ...base, marketId: "london", sourceText: "We want a global star to headline the pop-up, but the launch must not feel celebrity-led." },
+    generator: none,
+    expect: { decision: "ready" },
   },
 
-  // ---------- conflicts ----------
+  // ---------- conflicts: two explicit instructions that contradict ----------
   {
-    id: "conflict-booked-and-better",
-    kind: "conflict",
-    note: "Booked venue and 'find a better venue': one priority question; no separate strength question.",
-    brief: { ...base, marketId: "london", sourceText: "We've booked Juniper Hall for the pop-up, but please find a better venue if you can.", existingChoices: [{ slot: "event_place", name: "Juniper Hall" }] },
+    id: "conflict-area-and-anywhere",
+    kind: "answer",
+    note: "'Must be in Shoreditch' and 'anywhere is fine': one question; buttons, text and delegation each patch it.",
+    brief: { ...base, marketId: "london", sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine." },
     generator: none,
     expect: {
       decision: "clarify",
       reasons: ["conflict"],
-      questionId: "conflict:keep-or-replace:event_place",
-      delegated: { assumption: "kept as fixed", patches: [{ kind: "choice_strength", slot: "event_place", name: "Juniper Hall", strength: "locked" }], provisional: true },
+      questionId: "conflict:neighbourhood-vs-anywhere",
+      delegated: { assumption: "Shoreditch is preferred, not required", patches: [{ kind: "geography", place: "Shoreditch", strictness: "nearby" }], provisional: true },
+      answers: [
+        { options: [1], patches: [{ kind: "geography", place: "Shoreditch", strictness: "required" }] },
+        { options: [2], patches: [{ kind: "geography", place: "Shoreditch", strictness: "city" }] },
+        { text: "Somewhere east would be ideal", needsInterpretation: true },
+      ],
     },
-  },
-  {
-    id: "conflict-headline-vs-celebrity",
-    kind: "conflict",
-    note: "A headline name wanted and celebrity avoided.",
-    brief: { ...base, marketId: "london", sourceText: "We want a global star to headline the pop-up, but the launch must not feel celebrity-led." },
-    generator: none,
-    expect: { decision: "clarify", reasons: ["conflict"], questionId: "conflict:headline-vs-product" },
   },
   {
     id: "conflict-named-and-excluded",
@@ -287,10 +291,10 @@ export const FIXTURES: ClarificationFixture[] = [
   {
     id: "unnecessary-tradeoff-before-plans",
     kind: "unnecessary",
-    note: "A trade-off is askable only between viable complete plans, which don't exist before the run.",
+    note: "A trade-off between directions is the comparison's work, never an intake question.",
     brief: { ...base, marketId: "london", sourceText: "A pop-up and a sampling workshop for our new skincare line." },
     generator: { proposals: [proposal({ reason: "tradeoff", what: "Reach versus local specificity.", sourcePhrases: ["pop-up"], prompt: "Do you prefer broad reach or local specificity?" })] },
-    expect: { decision: "ready", assumption: "Proceed with the brief as written." },
+    expect: { decision: "ready", forbidden: ["reach", "specificity"] },
   },
   {
     id: "leading-candidate-names",
@@ -315,11 +319,49 @@ export const FIXTURES: ClarificationFixture[] = [
     expect: { decision: "ready" },
   },
 
-  // ---------- model proposals the code admits ----------
+  // ---------- model proposals: only a strict, mandatory rule meaning is admitted (P2.1) ----------
   {
     id: "model-rule-meaning",
     kind: "ambiguous",
-    note: "A free-text hard rule with two plausible meanings that change eligibility.",
+    note: "An explicitly mandatory rule with two mutually exclusive readings and no conservative reading.",
+    brief: {
+      ...base,
+      marketId: "london",
+      sourceText: "A pop-up for our streetwear label. Only partners from the collective may be used.",
+      constraints: [{ id: "r", description: "Only partners from the collective may be used", kind: "hard" }],
+    },
+    generator: {
+      proposals: [
+        proposal({
+          reason: "rule_meaning",
+          what: "Which collective the rule means.",
+          sourcePhrases: ["Only partners from the collective may be used"],
+          affectedSlots: ["brand_collaboration"],
+          interpretations: [
+            { label: "Members of the Hackney Wick collective", consequence: "Only that collective's partners." },
+            { label: "Members of the Peckham collective", consequence: "Only that collective's partners." },
+          ],
+          changesEligibility: true,
+          safeDefault: "The rule is kept, and a person confirms which collective it means.",
+          prompt: "Which collective does the partner rule mean?",
+          ruleIsMandatory: true,
+          mutuallyExclusive: true,
+          conservativeReading: "",
+        }),
+      ],
+    },
+    expect: {
+      decision: "clarify",
+      reasons: ["rule_meaning"],
+      questionId: "model:rule_meaning",
+      answers: [{ options: [2], patches: [{ kind: "rule_meaning", rule: "Only partners from the collective may be used", meaning: "Members of the Peckham collective" }] }],
+      delegated: { assumption: "a person confirms which collective", patches: [{ kind: "assumption", text: "The rule is kept, and a person confirms which collective it means." }], provisional: true },
+    },
+  },
+  {
+    id: "model-rule-conservative",
+    kind: "unnecessary",
+    note: "A mandatory rule a conservative reading keeps safe is read that way and recorded, not asked.",
     brief: {
       ...base,
       marketId: "london",
@@ -333,28 +375,20 @@ export const FIXTURES: ClarificationFixture[] = [
           what: "Whether 'fast fashion' covers high-street labels with sustainable lines.",
           sourcePhrases: ["No fast fashion partners"],
           affectedSlots: ["brand_collaboration"],
-          interpretations: [
-            { label: "Exclude all high-street labels", consequence: "Narrower partner pool." },
-            { label: "Only exclude ultra-fast retailers", consequence: "Wider partner pool." },
-          ],
           changesEligibility: true,
-          safeDefault: "All high-street labels are excluded.",
           prompt: "Does 'no fast fashion' rule out every high-street label?",
+          ruleIsMandatory: true,
+          mutuallyExclusive: true,
+          conservativeReading: "every high-street label is excluded",
         }),
       ],
     },
-    expect: {
-      decision: "clarify",
-      reasons: ["rule_meaning"],
-      questionId: "model:rule_meaning",
-      answers: [{ options: [2], patches: [{ kind: "rule_meaning", rule: "No fast fashion partners", meaning: "Only exclude ultra-fast retailers" }] }],
-      delegated: { assumption: "All high-street labels are excluded.", patches: [{ kind: "assumption", text: "All high-street labels are excluded." }], provisional: true },
-    },
+    expect: { decision: "ready", assumption: "read conservatively: every high-street label is excluded" },
   },
   {
-    id: "model-multi-choice",
-    kind: "answer",
-    note: "'Local' with several compatible meanings: checkboxes; two answers give two patches.",
+    id: "model-local-meaning-dropped",
+    kind: "unnecessary",
+    note: "What 'local' should mean for a partner is the agent's work: dropped, even as checkboxes.",
     brief: { ...base, marketId: "london", sourceText: "We're launching streetwear with a pop-up and want a local brand partner." },
     generator: {
       proposals: [
@@ -364,30 +398,17 @@ export const FIXTURES: ClarificationFixture[] = [
           sourcePhrases: ["a local brand partner"],
           affectedSlots: ["brand_collaboration"],
           interpretations: [
-            { label: "Founded in the city", consequence: "Only city-founded partners." },
-            { label: "Independent rather than global", consequence: "Global labels drop out." },
-            { label: "Culturally relevant here", consequence: "Global labels with local relevance stay." },
+            { label: "Founded in the city", consequence: "" },
+            { label: "Independent rather than global", consequence: "" },
+            { label: "Culturally relevant here", consequence: "" },
           ],
           multi: true,
           changesEligibility: true,
-          safeDefault: "Local relevance is preferred, not mandatory.",
           prompt: "Which of these must the partner be? Select any that are required.",
         }),
       ],
     },
-    expect: {
-      decision: "clarify",
-      reasons: ["geography"],
-      answers: [
-        {
-          options: [1, 2],
-          patches: [
-            { kind: "quality", quality: "Founded in the city", polarity: "required" },
-            { kind: "quality", quality: "Independent rather than global", polarity: "required" },
-          ],
-        },
-      ],
-    },
+    expect: { decision: "ready" },
   },
 
   // ---------- the model fails ----------
@@ -403,9 +424,9 @@ export const FIXTURES: ClarificationFixture[] = [
     id: "generator-failure-ambiguous",
     kind: "generator_failure",
     note: "Deterministic findings still stand when the model fails.",
-    brief: { ...base, marketId: "new-york", sourceText: "We're planning a pop-up on the Lower East Side with live screen printing and customisation." },
+    brief: { ...base, marketId: "london", sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine." },
     generator: "fail",
-    expect: { decision: "clarify", reasons: ["geography"] },
+    expect: { decision: "clarify", reasons: ["conflict"] },
   },
 
   // ---------- budget ----------
@@ -413,45 +434,65 @@ export const FIXTURES: ClarificationFixture[] = [
     id: "budget-turns-used",
     kind: "budget",
     note: "After two turns, the default is applied and recorded, and the run proceeds.",
-    brief: { ...base, marketId: "new-york", sourceText: "We're planning a pop-up on the Lower East Side with live screen printing and customisation." },
+    brief: { ...base, marketId: "london", sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine." },
     generator: none,
     budget: { turnsUsed: 2, questionsAsked: 2 },
-    expect: { decision: "ready", assumption: "preferred, not mandatory" },
+    expect: { decision: "ready", assumption: "Shoreditch is preferred, not required", provisional: true },
   },
   {
     id: "budget-questions-used",
     kind: "budget",
     note: "After three questions, the default is applied.",
-    brief: { ...base, marketId: "new-york", sourceText: "We're planning a pop-up on the Lower East Side with live screen printing and customisation." },
+    brief: { ...base, marketId: "london", sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine." },
     generator: none,
     budget: { turnsUsed: 1, questionsAsked: 3 },
-    expect: { decision: "ready", assumption: "preferred, not mandatory" },
+    expect: { decision: "ready", assumption: "Shoreditch is preferred, not required" },
   },
   {
     id: "budget-priority-and-defer",
     kind: "budget",
-    note: "Two material uncertainties on the first turn: the conflict is asked, the neighbourhood waits for the next turn.",
-    brief: { ...base, marketId: "new-york", sourceText: "We've booked Pier Hall for a pop-up on the Lower East Side, but please find a better venue if you can.", existingChoices: [{ slot: "event_place", name: "Pier Hall" }] },
+    note: "Three askable decisions on the first turn: a contradiction is asked first, the rest wait for the next turn.",
+    brief: {
+      ...base,
+      marketId: "london",
+      sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine. We plan to collaborate with Linden & Co. Never use Linden & Co. We'd like Saffron Ray to perform.",
+      existingChoices: [
+        { slot: "brand_collaboration", name: "Linden & Co" },
+        { slot: "artist_music", name: "Saffron Ray" },
+      ],
+      constraints: [{ id: "x", description: "Never use Linden & Co", kind: "hard", excludeNames: ["Linden & Co"] }],
+    },
+    identities: [{ slot: "artist_music", name: "Saffron Ray", expectedCountry: "India", qlooDescription: "American country singer." }],
     generator: none,
-    expect: { decision: "clarify", reasons: ["conflict"], deferred: 1 },
+    expect: { decision: "clarify", reasons: ["conflict"], deferred: 2 },
   },
   {
     id: "budget-last-turn",
     kind: "budget",
-    note: "The same brief on the last turn: the conflict is asked and the neighbourhood is assumed, since no turn remains.",
-    brief: { ...base, marketId: "new-york", sourceText: "We've booked Pier Hall for a pop-up on the Lower East Side, but please find a better venue if you can.", existingChoices: [{ slot: "event_place", name: "Pier Hall" }] },
+    note: "The same brief on the last turn: one is asked and the rest are assumed, since no turn remains.",
+    brief: {
+      ...base,
+      marketId: "london",
+      sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine. We plan to collaborate with Linden & Co. Never use Linden & Co. We'd like Saffron Ray to perform.",
+      existingChoices: [
+        { slot: "brand_collaboration", name: "Linden & Co" },
+        { slot: "artist_music", name: "Saffron Ray" },
+      ],
+      constraints: [{ id: "x", description: "Never use Linden & Co", kind: "hard", excludeNames: ["Linden & Co"] }],
+    },
+    identities: [{ slot: "artist_music", name: "Saffron Ray", expectedCountry: "India", qlooDescription: "American country singer." }],
     generator: none,
     budget: { turnsUsed: 1, questionsAsked: 1 },
-    expect: { decision: "clarify", reasons: ["conflict"], deferred: 0, assumption: "preferred, not mandatory" },
+    expect: { decision: "clarify", reasons: ["conflict"], deferred: 0, assumption: "stays unresolved" },
   },
   {
     id: "already-asked",
     kind: "budget",
     note: "A question already answered in the session is never asked again.",
-    brief: { ...base, marketId: "new-york", sourceText: "We're planning a pop-up on the Lower East Side with live screen printing and customisation." },
+    brief: { ...base, marketId: "london", sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine." },
     generator: none,
     budget: { turnsUsed: 1, questionsAsked: 1 },
-    askedIds: ["geography:lower east side"],
+    askedIds: ["conflict:neighbourhood-vs-anywhere"],
     expect: { decision: "ready" },
   },
 ];

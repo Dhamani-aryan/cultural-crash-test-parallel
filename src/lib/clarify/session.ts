@@ -171,7 +171,8 @@ async function gateTurn(session: Session, deps: SessionDeps): Promise<ClarifyEve
   apply(session, "default", gate.assumedPatches);
   session.assumptions.push(...gate.assumptions.filter((a) => !session.assumptions.includes(a)));
   session.provisional.push(...gate.provisional.filter((a) => !session.provisional.includes(a)));
-  return [...(session.answers.length ? [] : [{ type: "assistant_message" as const, text: understood(gate) }]), ready(session)];
+  const line = session.answers.length ? null : understood(gate);
+  return [...(line ? [{ type: "assistant_message" as const, text: line }] : []), ready(session)];
 }
 
 function apply(session: Session, source: string, patches: BriefPatch[]) {
@@ -194,7 +195,7 @@ function ready(session: Session): ClarifyEvent {
 }
 
 /** The opening line when nothing needs asking: what the brief already settles, in plain words. */
-function understood(gate: GateResult): string {
+function understood(gate: GateResult): string | null {
   const said = gate.resolutions
     .flatMap((r) => r.patches)
     .flatMap((p) => {
@@ -204,9 +205,10 @@ function understood(gate: GateResult): string {
       return [];
     })
     .slice(0, 3);
-  if (!said.length) return "I have enough to work with.";
+  // The intake has already said it has enough; this adds only what the brief settles, if anything.
+  if (!said.length) return null;
   const list = said.length > 1 ? `${said.slice(0, -1).join(", ")} and ${said.at(-1)}` : said[0];
-  return `I have enough to work with. I’ll ${list}.`;
+  return `I’ll ${list}.`;
 }
 
 const keyOf = (answers: AnswerInput[]) =>

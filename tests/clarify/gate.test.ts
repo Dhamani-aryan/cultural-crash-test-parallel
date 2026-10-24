@@ -9,14 +9,15 @@ import { FIXTURES } from "../../eval/clarification-fixtures";
 import { worldClient } from "../crashtest/world";
 
 const NONE = { eligibility: false, constraintState: false, eventRole: false, winnerOrder: false, identity: false };
+// Two explicit instructions that contradict: still a question after P2.1.
 const lesBrief = LaunchBriefSchema.parse({
   productCategory: "Streetwear",
   launchGoal: "Launch event",
   audienceDescription: "Young creatives",
-  marketId: "new-york",
-  sourceText: "We're planning a pop-up on the Lower East Side with live screen printing and customisation.",
+  marketId: "london",
+  sourceText: "The pop-up must be in Shoreditch, though anywhere in London is fine.",
 });
-const ny = marketById("new-york")!;
+const ny = marketById("london")!;
 
 describe("materiality", () => {
   it("asks only when eligibility, a constraint, the event role or identity changes", () => {
@@ -41,7 +42,7 @@ describe("materiality", () => {
 
 describe("candidate leakage", () => {
   it("flags names the brief and the city don't give, but not sentence openings or the city's areas", () => {
-    const allowed = `${lesBrief.sourceText} New York NYC Manhattan`;
+    const allowed = "We're planning a pop-up on the Lower East Side. New York NYC Manhattan";
     expect(foreignNames(["Nearby downtown Manhattan is acceptable"], allowed)).toEqual([]);
     expect(foreignNames(["How strict is the Lower East Side location?"], allowed)).toEqual([]);
     expect(foreignNames(["Should the partner be Brindle Works?"], allowed)).toEqual(["Brindle Works"]);
@@ -87,9 +88,9 @@ describe("the budget", () => {
 
   it("asks two questions only when asked to, never more than the per-turn cap", async () => {
     const f = FIXTURES.find((x) => x.id === "budget-priority-and-defer")!;
-    const r = await runGate({ brief: LaunchBriefSchema.parse(f.brief), market: ny, llm: null, perTurn: 2 });
-    expect(r.questions.map((q) => q.reason)).toEqual(["conflict", "geography"]);
-    expect(r.deferred).toEqual([]);
+    const r = await runGate({ brief: LaunchBriefSchema.parse(f.brief), market: ny, identities: f.identities, llm: null, perTurn: 2 });
+    expect(r.questions.map((q) => q.reason)).toEqual(["conflict", "conflict"]);
+    expect(r.deferred).toHaveLength(1);
   });
 });
 

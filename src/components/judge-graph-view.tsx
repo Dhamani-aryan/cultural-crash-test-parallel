@@ -107,7 +107,19 @@ export default function JudgeGraphView({
 }) {
   const graph = useMemo(() => buildJudgeGraph(state, decisions), [state, decisions]);
   const trace = useMemo(() => buildDecisionTrace(state), [state]);
-  const layout = useMemo(() => layoutGraph(graph, focus), [graph, focus]);
+  // A narrow canvas (a phone) lays the graph out top to bottom, so labels have room.
+  const frame = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const el = frame.current;
+    if (!el) return;
+    const measure = () => setNarrow(el.clientWidth < 640);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const layout = useMemo(() => layoutGraph(graph, focus, { narrow }), [graph, focus, narrow]);
   const timeline = useMemo(() => buildReplay(graph, focus), [graph, focus]);
   const [webgl] = useState(hasWebGL);
   const [reduced] = useState(prefersReduced);
@@ -233,7 +245,7 @@ export default function JudgeGraphView({
         )}
       </div>
 
-      <div className="h-[380px] overflow-hidden rounded-xl border border-line bg-[#141619] sm:h-[480px]">
+      <div ref={frame} className="h-[540px] overflow-hidden rounded-xl border border-line bg-[#141619] sm:h-[480px]">
         {webgl ? (
           <Scene
             graph={graph}
