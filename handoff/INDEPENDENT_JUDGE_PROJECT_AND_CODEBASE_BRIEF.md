@@ -28,9 +28,12 @@ The same specification records the submission requirements: a working Qloo-integ
 
 ## Product description
 
-**Name:** Cultural Crash-Test  
-**Tagline:** Find the cultural mismatch before launch. Then fix it.  
-**Product type:** Conversational agentic web application  
+**Name:** Cultural Crash-Test
+
+**Tagline:** Find the cultural mismatch before launch. Then fix it.
+
+**Product type:** Conversational agentic web application
+
 **Intended user:** A consumer-brand founder or creative/marketing team planning a launch in a supported city
 
 Cultural Crash-Test accepts a natural-language launch brief describing a brand, product, target city, audience, proposed music act, collaboration, venue, creative direction, and constraints. It constructs and compares three independent directions:
