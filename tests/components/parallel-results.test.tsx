@@ -40,30 +40,17 @@ describe("parallel results", () => {
     expect(html.match(/<details><summary[^>]*>Why this won<\/summary>/g)).toHaveLength(4);
   });
 
-  it("summarises the winner, stability, rules, coverage, counts, cost and checks at the top", async () => {
+  it("keeps the marketer view focused and places judge diagnostics behind one details control", async () => {
     const state = await parallel();
     const html = renderToStaticMarkup(<RunResult state={state} />);
     expect(html).toContain("Best complete plan: The evidence-first agent’s plan");
-    expect(html).toMatch(
-      /Stable: all \d+ recorded stability checks preserved the recommendation\./,
-    );
-    expect(html).toContain("Decision stability");
-    expect(html).toContain("Evidence stress tests:");
-    expect(html).toContain("View stability checks");
-    expect(html).toContain("Without Northcap");
-    for (const s of [
-      "Hard rules passed",
-      "Evidence coverage",
-      "Supported / thin / unverified",
-      "Qloo checks · model calls",
-      "To confirm",
-      "Plan delta",
-      "Qloo contribution",
-      "Decision test",
-      "Comparison table",
-      "Decision graph",
-    ])
-      expect(html).toContain(s);
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("View details");
+    expect(html).toContain("Plan comparison");
+    expect(html).not.toContain("Decision stability");
+    expect(html).not.toContain("Qloo checks · model calls");
+    expect(html).not.toContain("How the verdict was reached");
+    expect(html).not.toContain("Decision graph");
     expect(html).not.toMatch(/predicted sales|guaranteed|will sell/i);
   });
 
