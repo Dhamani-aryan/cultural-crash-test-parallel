@@ -496,7 +496,7 @@ const net = (claims: EvidenceClaim[], dims: EvidenceDimension[]) =>
 const PREFERENCE: Partial<Record<RuleId, number>> = { "R-user-choice": 0.5, "R-user-considered": 0.25 };
 
 /**
- * The decision policy (evidence:v5) as a vector, compared left to right:
+ * The decision policy (evidence:v6) as a vector, compared left to right:
  *   1. hard failures; 2. explicit locks kept; 3. completeness; 4. fewest explicit brief-fit
  *   contradictions; 5. fewest structured role doubts; 6. positive role and brief fit (with the
  *   user's unlocked choices as weighted preferences); 7. audience support, counted per choice so

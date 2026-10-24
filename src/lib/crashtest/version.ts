@@ -34,8 +34,10 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * re-evaluations; a reversal is surfaced as provisional instead of hidden behind a single verdict.
  * v5: explicit brief contradictions and structured role doubts rank ahead of raw affinity, so
  * several unrelated positive claims cannot hide one narratively wrong component.
+ * v6: relational free-text rules remain coherence questions instead of being misread as lexical
+ * bans on every noun they contain.
  */
-export const PARALLEL_VERSION = "parallel:v5";
+export const PARALLEL_VERSION = "parallel:v6";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
@@ -45,8 +47,10 @@ export const PARALLEL_VERSION = "parallel:v5";
  * named neighbourhood ranks with brief fit, above audience affinity, and 2–6 km from it is outside it.
  * v5: minimize explicit brief contradictions and structured role doubts before positive fit and
  * affinity; positive claims can no longer cancel a material mismatch in another slot.
+ * v6: only lexically verifiable avoidances become entity-level claims; relational free-text rules
+ * such as "don't mix unrelated fashion and music" are not reduced to "avoid fashion".
  */
-export const EVIDENCE_RUBRIC_VERSION = "evidence:v5";
+export const EVIDENCE_RUBRIC_VERSION = "evidence:v6";
 /** The blind, order-rotated adjudication protocol. v2 gives contradictions and role doubts priority over affinity. */
 export const ADJUDICATION_VERSION = "adjudicate:v2";
 

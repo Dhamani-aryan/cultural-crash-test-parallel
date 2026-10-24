@@ -14,9 +14,10 @@ import { venueFormat } from "./repair";
  * collaboration brand to be a product brand by Qloo's own tags, and treats retail, or food and
  * nightlife when the brief does not call for them, as at most possible hosts. v5 applies that same
  * strict host reading to the evidence matrix for every track, so selection and adjudication cannot
- * describe the same venue differently.
+ * describe the same venue differently. v6 keeps relational free-text rules out of the lexical
+ * avoidance screen when code cannot verify their compositional meaning.
  */
-export const SCREENS_VERSION = "screens:v5";
+export const SCREENS_VERSION = "screens:v6";
 
 const cat = (c: string) => `urn:tag:category:place:${c}`;
 
@@ -146,9 +147,18 @@ export function centralityFlag(slot: "artist_music" | "brand_collaboration" | "e
 const VAGUE = new Set(
   "another other being becoming using simply relying creating feeling looking working brand brands clothing product products event events launch thing things could would anywhere world references attention popular standard impressive afterthought added musician".split(" "),
 );
+/**
+ * These phrases constrain the relationship or execution, not every noun inside them. For example,
+ * "don't mix unrelated fashion and music references" does not mean "avoid fashion". A lexical
+ * entity screen cannot verify that compositional rule, so it must leave it to coherence review.
+ */
+const NON_LEXICAL_AVOIDANCE = /\b(mix(?:ing)?|unrelated|references?|rely(?:ing)?|feeling like|afterthought|added (?:at|to))\b/i;
 /** The content words of the brief's avoidances: "the usual beach-party aesthetic" → beach, party. */
 export function avoidedWords(contract: IntentContract): string[] {
-  const words = contract.negative.flatMap((n) => n.value.toLowerCase().split(/[^\p{L}]+/u)).filter((w) => w.length >= 5 && !VAGUE.has(w));
+  const words = contract.negative
+    .filter((n) => !NON_LEXICAL_AVOIDANCE.test(n.value))
+    .flatMap((n) => n.value.toLowerCase().split(/[^\p{L}]+/u))
+    .filter((w) => w.length >= 5 && !VAGUE.has(w));
   return [...new Set(words.filter((w) => !["aesthetic", "imagery", "generic", "usual", "predictable", "typical", "mainstream", "celebrity", "unrelated"].includes(w)))];
 }
 

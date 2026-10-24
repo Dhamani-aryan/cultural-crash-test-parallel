@@ -799,11 +799,11 @@ describe("v3: honest outcomes and versions", () => {
 
   it("records the v3 architecture and what fixed the run's behaviour", async () => {
     const { p } = await run();
-    expect(PARALLEL_VERSION).toBe("parallel:v5");
-    expect(p.architectureVersion).toBe("parallel:v5");
+    expect(PARALLEL_VERSION).toBe("parallel:v6");
+    expect(p.architectureVersion).toBe("parallel:v6");
     expect(p.config).toMatchObject({
       contractVersion: "contract:v1",
-      screensVersion: "screens:v5",
+      screensVersion: "screens:v6",
       beamWidth: BEAM_WIDTH,
       challengeRounds: 2,
       model: "fake",
@@ -820,7 +820,7 @@ describe("v3: frozen evaluation artifacts", () => {
     directory: string,
     summaryFile: string,
     existing: string[] = [],
-    runVersion = "crash:v15+parallel:v5",
+    runVersion = "crash:v15+parallel:v6",
   ) => outputRefusal({ directory, summaryFile, runVersion, frozen: isFrozen, existing });
 
   it("never writes into a frozen baseline", () => {
@@ -846,7 +846,7 @@ describe("v3: frozen evaluation artifacts", () => {
     ).toMatch(/holds runs from crash:v15\+parallel:v2/);
     expect(
       guard("eval/out/scenario-runs-sentinel", "eval/out/scenario-summary-sentinel.json", [
-        "crash:v15+parallel:v5",
+        "crash:v15+parallel:v6",
       ]),
     ).toBeNull();
     expect(

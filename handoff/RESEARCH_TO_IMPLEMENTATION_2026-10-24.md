@@ -54,3 +54,5 @@ The selector reduced those six rows to three representatives for the remaining p
 2. A stable verdict can still contain feasibility unknowns; the UI must keep those as human checks rather than imply availability.
 3. The blinded human-review sheet must be completed before opening its key or making a final accuracy claim.
 
+The detailed offline failure analysis is in `handoff/FAILURE_PATTERN_AUDIT_2026-10-24.md`.
+

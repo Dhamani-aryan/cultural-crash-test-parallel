@@ -3,7 +3,7 @@ import { agentKey, selectionFlags, type SelectionFlags } from "@/lib/crashtest/a
 import { compileIntent } from "@/lib/crashtest/intent";
 import { compareVectors, evidenceVector } from "@/lib/crashtest/matrix";
 import { runCrashTest } from "@/lib/crashtest/run";
-import { brandRole, hostTier, selectionHostTier } from "@/lib/crashtest/screens";
+import { avoidedMatch, brandRole, hostTier, selectionHostTier } from "@/lib/crashtest/screens";
 import { LaunchBriefSchema, type Component, type LaunchBriefInput, type PoolRecord, type RunState } from "@/lib/crashtest/types";
 import { marketById } from "@/lib/markets";
 import type { QlooEntity } from "@/lib/qloo";
@@ -162,7 +162,38 @@ describe("screens:v4: selection", () => {
   });
 });
 
-describe("evidence:v5: material contradictions cannot be averaged away", () => {
+describe("brief avoidance screens", () => {
+  it("does not turn a relational coherence rule into a ban on its nouns", () => {
+    const contract = contractOf({
+      sourceText:
+        "An upcycled denim pop-up without mixing unrelated fashion and music references just because they're popular.",
+      brandAttributes: [
+        "without mixing unrelated fashion and music references just because they're popular",
+      ],
+    });
+    const beams = entity("beams", {
+      name: "Beams",
+      type: "urn:entity:brand",
+      shortDescription: "A Japanese fashion brand known for clothing collaborations.",
+    });
+    expect(avoidedMatch(beams, contract)).toBeNull();
+  });
+
+  it("still catches a directly avoided quality", () => {
+    const contract = contractOf({
+      sourceText: "An outdoor launch avoiding the usual beach-party aesthetic.",
+      brandAttributes: ["avoiding the usual beach-party aesthetic"],
+    });
+    const beach = entity("beach", {
+      name: "Beach House",
+      type: "urn:entity:brand",
+      shortDescription: "A beach lifestyle label.",
+    });
+    expect(avoidedMatch(beach, contract)).toBe("beach");
+  });
+});
+
+describe("evidence:v6: material contradictions cannot be averaged away", () => {
   let claimNumber = 0;
   const claim = (candidateId: string, dimension: string, stance: string, ruleId?: string) => ({
     candidateId,
