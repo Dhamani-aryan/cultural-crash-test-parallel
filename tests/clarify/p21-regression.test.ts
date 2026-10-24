@@ -78,6 +78,7 @@ describe("P2.1: Morrow reaches U, L and A with four preferred choices", () => {
     expect(es.some((e) => e.type === "clarification_required")).toBe(false);
     const ready = es.find((e): e is Extract<Event, { type: "ready" }> => e.type === "ready")!;
     const state = (es.find((e) => e.type === "done") as Extract<Event, { type: "done" }>).state as RunState;
+    expect(state.brief.exploreUserChoices).toBe(true);
     expect(state.brief.constraints.some((c) => c.lockSlot)).toBe(false);
     const user = state.parallel!.candidates.find((c) => c.candidateId === "user")!;
     expect(user.plan.components.map((c) => [c.label, c.locked])).toEqual(

@@ -151,8 +151,8 @@ describe("summarizeRun and briefConstants", () => {
   it("counts the three stages and states the delta truthfully", async () => {
     const s = await run({ ...LONDON_BRIEF, existingChoices: [{ slot: "event_place", name: "Yard Hall" }] });
     const sum = summarizeRun(s)!;
-    expect(sum).toMatchObject({ changed: 1, retained: 3, total: 4, userSpecified: 1, llmAdded: 3, outcome: "agent" });
-    expect(sum.headline).toBe("1 choice changed. 3 retained.");
+    expect(sum).toMatchObject({ changed: 2, retained: 2, total: 4, userSpecified: 1, llmAdded: 3, outcome: "agent" });
+    expect(sum.headline).toBe("2 choices changed. 2 retained.");
     expect(sum.detail).toMatch(/fewer choice|more supported/);
     expect(sum.revisedSupported).toBeGreaterThan(sum.baselineSupported);
   });

@@ -380,19 +380,19 @@ describe("intake", () => {
   it("carries locks, exclusions and the exploration switch into the crash-test brief", async () => {
     const { llm } = fakeLlm(fullFacts);
     const r = await applyIntake(llm, { action: "message", message: FULL, marketId: "london" });
-    expect(r.state.brief.exploreUserChoices).toBe(false);
+    expect(r.state.brief.exploreUserChoices).toBe(true);
     const brief = LaunchBriefSchema.parse(toLaunchBrief(r.state));
-    expect(brief.exploreUserChoices).toBe(false);
+    expect(brief.exploreUserChoices).toBe(true);
     expect(brief.constraints).toContainEqual(expect.objectContaining({ lockSlot: "event_place" }));
     expect(brief.constraints).toContainEqual(expect.objectContaining({ excludeNames: ["Gucci"] }));
-    const on = await applyIntake(llm, {
+    const off = await applyIntake(llm, {
       action: "update_brief",
-      patch: { exploreUserChoices: true },
+      patch: { exploreUserChoices: false },
       state: r.state,
     });
     // An edit that leaves the brief complete summarises it again and runs it (P2.1: no second confirmation).
-    expect(on.startRequested).toBe(true);
-    expect(LaunchBriefSchema.parse(toLaunchBrief(on.state)).exploreUserChoices).toBe(true);
+    expect(off.startRequested).toBe(true);
+    expect(LaunchBriefSchema.parse(toLaunchBrief(off.state)).exploreUserChoices).toBe(false);
   });
 
   it("applies a brief edit through the HTTP handler without blanking other fields", async () => {

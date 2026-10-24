@@ -61,7 +61,7 @@ describe("results comparison", () => {
   it("frames the result with a receipt in accurate terms, a Table-first switch and the agent loop, without loading the graph", async () => {
     const html = renderToStaticMarkup(<RunResult state={await withUserChoice()} />);
     expect(html).toContain("What the agent did");
-    expect(html).toMatch(/4 choices tested · \d+ candidates? considered · \d+ re-tested · 1 accepted · 3 retained/);
+    expect(html).toMatch(/4 choices tested · \d+ candidates? considered · \d+ re-tested · 2 accepted · 2 retained/);
     expect(html).toMatch(/\d+ Qloo checks/);
     expect(html).not.toContain("Qloo queries");
     expect(html).not.toContain("sent to Qloo"); // not measured in this run, so not claimed

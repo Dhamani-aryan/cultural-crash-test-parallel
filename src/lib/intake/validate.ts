@@ -182,7 +182,7 @@ export function intakeFromBrief(
     otherRules: (brief.constraints ?? [])
       .filter((c) => !c.lockSlot && !c.excludeNames?.length)
       .map((c) => c.description),
-    exploreUserChoices: brief.exploreUserChoices ?? false,
+    exploreUserChoices: brief.exploreUserChoices ?? true,
   };
   const origins = Object.fromEntries(Object.keys(b).map((k) => [k, "user_supplied" as const]));
   const now = new Date().toISOString();

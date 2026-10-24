@@ -121,7 +121,7 @@ describe("user choices and the exploration switch", () => {
   it("keeps a thin, uncontradicted user choice when exploration is off", async () => {
     const { client } = worldClient();
     const { llm } = worldLlm({ draft: { artist: "Canal Echo" } });
-    const run = await runCrashTest({ qloo: client, llm }, thinUserChoice);
+    const run = await runCrashTest({ qloo: client, llm }, { ...thinUserChoice, exploreUserChoices: false });
     expect(run.plan!.components.find((c) => c.slot === "artist_music")?.label).toBe("Canal Echo");
   });
 

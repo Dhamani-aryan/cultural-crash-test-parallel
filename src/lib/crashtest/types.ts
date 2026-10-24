@@ -60,10 +60,11 @@ export const LaunchBriefSchema = z.object({
   depth: z.enum(["quick", "thorough"]).default("quick"),
   /**
    * May the agent try better-supported alternatives to the user's own (unlocked) choices when
-   * they are merely thin? Off by default: then a user's choice changes only when the evidence
-   * contradicts it. A per-choice lock always wins.
+   * they are merely thin? On by default: a named choice is the user's current plan, not a hidden
+   * lock. Replacement still has to pass the strict supported/material-improvement gates. A
+   * per-choice lock always wins.
    */
-  exploreUserChoices: z.boolean().default(false),
+  exploreUserChoices: z.boolean().default(true),
   /** Optional website, kept as metadata only: it is never fetched. */
   website: z.string().trim().max(200).optional(),
 });

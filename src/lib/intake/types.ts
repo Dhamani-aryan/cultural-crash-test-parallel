@@ -45,7 +45,8 @@ export const IntakeBriefSchema = z.object({
   choices: z.array(ChoiceSchema).max(4).default([]),
   exclude: z.array(z.string().trim().min(1).max(80)).max(10).default([]),
   otherRules: z.array(z.string().trim().min(1).max(200)).max(4).default([]),
-  exploreUserChoices: z.boolean().default(false),
+  /** Ordinary picks may be tested against stronger alternatives; explicit locks still win. */
+  exploreUserChoices: z.boolean().default(true),
 });
 export type IntakeBrief = z.infer<typeof IntakeBriefSchema>;
 export type BriefField = keyof IntakeBrief;
