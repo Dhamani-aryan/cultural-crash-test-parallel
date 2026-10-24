@@ -118,6 +118,7 @@ New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydne
 
 ## Repository
 
+- [`docs/PROJECT_ARCHITECTURE_LEARNING_COURSE.md`](docs/PROJECT_ARCHITECTURE_LEARNING_COURSE.md): progressive course covering the product, agent architecture, Qloo evidence flow, decision policy, runtime, UI, function map, code-reading labs and judge questions.
 - `src/lib/crashtest/`:
   - types and schemas;
   - evidence ledger and budget guard;
