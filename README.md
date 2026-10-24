@@ -118,6 +118,7 @@ New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydne
 
 ## Repository
 
+- [`docs/FINAL_SUBMISSION_RUNBOOK.md`](docs/FINAL_SUBMISSION_RUNBOOK.md): deadline-aware, step-by-step release, deployment, Devpost, judging-period and finalist-preparation checklist for the Qloo Agentic Hackathon 2026.
 - [`docs/PROJECT_ARCHITECTURE_LEARNING_COURSE.md`](docs/PROJECT_ARCHITECTURE_LEARNING_COURSE.md): progressive course covering the product, agent architecture, Qloo evidence flow, decision policy, runtime, UI, function map, code-reading labs and judge questions.
 - `src/lib/crashtest/`:
   - types and schemas;
