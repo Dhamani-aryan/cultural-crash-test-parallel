@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { buildDecisionTrace, decisionDetails } from "@/lib/crashtest/decision-trace";
 import type { DecisionExplanation } from "@/lib/crashtest/explain";
 import { buildJudgeGraph, KIND_LABEL, pathText, type JudgeGraphNode, type JudgeNodeKind } from "@/lib/crashtest/judge-graph";
+import { buildParallelJudgeGraph } from "@/lib/crashtest/parallel-judge-graph";
 import { layoutGraph } from "@/lib/crashtest/judge-layout";
 import { buildReplay, stepChanges } from "@/lib/crashtest/judge-replay";
 import type { RunState, Slot } from "@/lib/crashtest/types";
@@ -94,19 +95,28 @@ function EvidenceRecords({ node, state }: { node: JudgeGraphNode; state: RunStat
 
 export default function JudgeGraphView({
   state,
-  decisions,
+  decisions = [],
   focus,
   onFocus,
   onStep,
 }: {
   state: RunState;
-  decisions: DecisionExplanation[];
+  decisions?: DecisionExplanation[];
   focus: Slot | null;
   onFocus: (slot: Slot | null) => void;
   onStep: (step: number | null) => void;
 }) {
-  const graph = useMemo(() => buildJudgeGraph(state, decisions), [state, decisions]);
-  const trace = useMemo(() => buildDecisionTrace(state), [state]);
+  const graph = useMemo(
+    () =>
+      state.architecture === "parallel"
+        ? buildParallelJudgeGraph(state)
+        : buildJudgeGraph(state, decisions),
+    [state, decisions],
+  );
+  const trace = useMemo(
+    () => (state.architecture === "parallel" ? [] : buildDecisionTrace(state)),
+    [state],
+  );
   // A narrow canvas (a phone) lays the graph out top to bottom, so labels have room.
   const frame = useRef<HTMLDivElement>(null);
   const [narrow, setNarrow] = useState(false);
@@ -178,7 +188,15 @@ export default function JudgeGraphView({
   const entry = focus ? trace.find((t) => t.slot === focus) : undefined;
   const nodeFor = (name: string, iteration: number) =>
     graph.nodes.find((n) => n.kind === "candidate" && n.slot === focus && n.change?.after === name && n.change.iteration === iteration)?.id;
-  const fields = entry ? decisionDetails(entry, nodeFor) : [];
+  const fields = entry
+    ? decisionDetails(entry, nodeFor)
+    : state.architecture === "parallel" && text
+      ? [
+          { label: "Final choice", value: text.headline },
+          { label: "Compared", value: text.lines[0] ?? "—" },
+          { label: "Decision", value: text.lines[1] ?? "—" },
+        ]
+      : [];
   const path = focus ? pathText(graph, focus) : [];
   const selectedNode = selected ? graph.nodes.find((n) => n.id === selected) : undefined;
   const interactive = (id: string) => {
@@ -286,7 +304,7 @@ export default function JudgeGraphView({
         </li>
       </ul>
 
-      {entry && (
+      {(entry || (state.architecture === "parallel" && text)) && (
         <section aria-labelledby="decision-details" className="rounded-xl border border-line bg-panel p-4 sm:p-5">
           <h3 id="decision-details" ref={detailsHeading} tabIndex={-1} className="scroll-mt-24 text-base font-semibold text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent">
             Decision details

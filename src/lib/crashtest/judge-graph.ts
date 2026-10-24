@@ -35,7 +35,10 @@ export type JudgeRelation =
   | "accepted_after_retest"
   | "retained"
   | "part_of"
-  | "decided_from";
+  | "decided_from"
+  | "generated_independently"
+  | "compared_blind"
+  | "selected";
 
 export const RELATION_LABEL: Record<JudgeRelation, string> = {
   supplied_by_user: "supplied by user",
@@ -50,6 +53,9 @@ export const RELATION_LABEL: Record<JudgeRelation, string> = {
   retained: "retained",
   part_of: "part of",
   decided_from: "decided from",
+  generated_independently: "generated independently",
+  compared_blind: "compared in two blind orders",
+  selected: "selected",
 };
 
 export const KIND_LABEL: Record<JudgeNodeKind, string> = {
@@ -297,12 +303,12 @@ export function visibleGraph(g: JudgeGraph, slot?: Slot) {
 
 /** The relationship that best says what a node did on the path, by node kind. */
 const PATH_RELATION: Record<JudgeNodeKind, JudgeRelation[]> = {
-  brief: ["supplied_by_user", "added_by_llm", "constrained_by"],
-  llm_choice: ["supplied_by_user", "added_by_llm"],
+  brief: ["supplied_by_user", "added_by_llm", "generated_independently", "constrained_by"],
+  llm_choice: ["generated_independently", "supplied_by_user", "added_by_llm"],
   qloo_evidence: ["supports", "did_not_support"],
-  candidate: ["rejected_after_retest", "tested_against"],
-  test: ["accepted_after_retest", "tested_against"],
-  final_choice: ["accepted_after_retest", "retained"],
+  candidate: ["generated_independently", "rejected_after_retest", "tested_against"],
+  test: ["compared_blind", "accepted_after_retest", "tested_against"],
+  final_choice: ["selected", "accepted_after_retest", "retained"],
   plan: [],
 };
 

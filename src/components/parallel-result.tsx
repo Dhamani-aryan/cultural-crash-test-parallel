@@ -1,5 +1,7 @@
 "use client";
 
+import dynamic from "next/dynamic";
+import { useState } from "react";
 import {
   parallelView,
   toParallelMarkdown,
@@ -7,7 +9,7 @@ import {
   type ClaimView,
   type RowView,
 } from "@/lib/crashtest/parallel-view";
-import { SLOT_LABEL, STOP_LABEL, type RunState, type UsageScope } from "@/lib/crashtest/types";
+import { SLOT_LABEL, STOP_LABEL, type RunState, type Slot, type UsageScope } from "@/lib/crashtest/types";
 
 const eyebrow = "font-mono text-[10px] uppercase tracking-[0.11em] text-muted";
 
@@ -153,7 +155,72 @@ const STABILITY_TONE = {
   unavailable: "text-unresolved",
 } as const;
 
+type ResultView = "table" | "graph";
+
+const JudgeGraphView = dynamic(() => import("./judge-graph-view"), {
+  ssr: false,
+  loading: () => <p className="py-16 text-center text-sm text-muted">Loading the decision graph…</p>,
+});
+
+function JudgeReceipt({ state, rows }: { state: RunState; rows: RowView[] }) {
+  const changedFromUser = rows.filter(
+    (row) => row.you.candidateId && row.you.label !== row.final.label,
+  ).length;
+  const changedFromLlm = rows.filter(
+    (row) => row.llm.candidateId && row.llm.label !== row.final.label,
+  ).length;
+  const qlooSupport = rows.reduce(
+    (count, row) => count + row.support.filter((claim) => claim.source === "Qloo").length,
+    0,
+  );
+  const facts = [
+    {
+      label: "Plan delta",
+      value: `${changedFromUser} from you · ${changedFromLlm} from LLM`,
+    },
+    {
+      label: "Qloo contribution",
+      value: `${qlooSupport} supporting claims · ${state.qlooUsage?.checks ?? state.qlooCallsUsed} checks`,
+    },
+    {
+      label: "Decision test",
+      value: `3 plans · 2 blind orders`,
+    },
+  ];
+  return (
+    <dl aria-label="Decision receipt" className="grid overflow-hidden rounded-xl border border-line bg-panel sm:grid-cols-3">
+      {facts.map((fact, index) => (
+        <div key={fact.label} className={`px-4 py-4 ${index ? "border-t border-line sm:border-l sm:border-t-0" : ""}`}>
+          <dt className={eyebrow}>{fact.label}</dt>
+          <dd className="mt-1 text-[15px] font-semibold leading-5 text-ink">{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function ViewSwitch({ view, onChange }: { view: ResultView; onChange: (view: ResultView) => void }) {
+  return (
+    <div role="group" aria-label="Result view" className="inline-flex overflow-hidden rounded-lg border border-line bg-panel">
+      {(["table", "graph"] as const).map((item) => (
+        <button
+          key={item}
+          type="button"
+          aria-pressed={view === item}
+          onClick={() => onChange(item)}
+          className={`min-h-10 px-4 text-sm font-medium transition-colors ${view === item ? "bg-ink text-bg" : "text-ink-2 hover:bg-panel-2"}`}
+        >
+          {item === "table" ? "Comparison table" : "Decision graph"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ParallelRunResult({ state }: { state: RunState }) {
+  const [viewMode, setViewMode] = useState<ResultView>("table");
+  const [focus, setFocus] = useState<Slot | null>(null);
+  const [step, setStep] = useState<number | null>(null);
   const view = parallelView(state);
   const p = state.parallel;
   if (!view || !p)
@@ -220,7 +287,27 @@ export function ParallelRunResult({ state }: { state: RunState }) {
         </dl>
       </header>
 
-      <section aria-labelledby="parallel-comparison">
+      <JudgeReceipt state={state} rows={view.rows} />
+
+      <div className="space-y-3">
+        <ViewSwitch
+          view={viewMode}
+          onChange={(next) => {
+            setViewMode(next);
+            setStep(null);
+          }}
+        />
+        <ol aria-label="Agent method" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+          {["Freeze brief", "Generate independently", "Test with Qloo", "Compare blind", "Stress-test", "Select"].map((label, index) => (
+            <li key={label} className="flex items-center gap-2" aria-current={step === index + 1 ? "step" : undefined}>
+              {index > 0 && <span aria-hidden>→</span>}
+              <span className={step === index + 1 ? "font-semibold text-accent" : undefined}>{label}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {viewMode === "table" ? <section aria-labelledby="parallel-comparison">
         <div className="mb-4">
           <p className={eyebrow}>Plan comparison</p>
           <h3
@@ -253,7 +340,14 @@ export function ParallelRunResult({ state }: { state: RunState }) {
             ))}
           </table>
         </div>
-      </section>
+      </section> : (
+        <JudgeGraphView
+          state={state}
+          focus={focus}
+          onFocus={setFocus}
+          onStep={setStep}
+        />
+      )}
 
       <section
         aria-label="How the verdict was reached"

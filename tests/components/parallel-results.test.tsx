@@ -2,6 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { RunResult } from "@/components/run-result";
 import { parallelView, toParallelMarkdown } from "@/lib/crashtest/parallel-view";
+import { buildParallelJudgeGraph } from "@/lib/crashtest/parallel-judge-graph";
+import { visibleGraph } from "@/lib/crashtest/judge-graph";
+import { layoutGraph } from "@/lib/crashtest/judge-layout";
+import { buildReplay } from "@/lib/crashtest/judge-replay";
 import { toMarkdown } from "@/lib/crashtest/report";
 import { runCrashTest } from "@/lib/crashtest/run";
 import type { LaunchBriefInput, RunState } from "@/lib/crashtest/types";
@@ -53,9 +57,48 @@ describe("parallel results", () => {
       "Supported / thin / unverified",
       "Qloo checks · model calls",
       "To confirm",
+      "Plan delta",
+      "Qloo contribution",
+      "Decision test",
+      "Comparison table",
+      "Decision graph",
     ])
       expect(html).toContain(s);
     expect(html).not.toMatch(/predicted sales|guaranteed|will sell/i);
+  });
+
+  it("projects the parallel run into the same collision-safe decision graph used by the UI", async () => {
+    const state = await parallel();
+    const graph = buildParallelJudgeGraph(state);
+    const overview = visibleGraph(graph);
+    expect(graph.decisions).toHaveLength(4);
+    expect(overview.nodes.map((node) => node.kind).sort()).toEqual([
+      "brief",
+      "final_choice",
+      "final_choice",
+      "final_choice",
+      "final_choice",
+      "plan",
+    ]);
+    expect(
+      graph.edges.filter(
+        (edge) =>
+          edge.relation === "generated_independently" || edge.relation === "supplied_by_user",
+      ),
+    ).toHaveLength(12);
+    expect(graph.edges.filter((edge) => edge.relation === "compared_blind")).toHaveLength(12);
+    expect(graph.nodes.some((node) => node.kind === "qloo_evidence")).toBe(true);
+
+    const ledger = new Set(state.evidenceLedger.map((record) => record.evidenceId));
+    for (const node of graph.nodes)
+      for (const evidenceId of node.evidenceIds) expect(ledger.has(evidenceId)).toBe(true);
+
+    for (const decision of graph.decisions) {
+      const focused = visibleGraph(graph, decision.slot);
+      const layout = layoutGraph(graph, decision.slot);
+      expect(focused.nodes.every((node) => layout.positions[node.id])).toBe(true);
+      expect(buildReplay(graph, decision.slot).events.length).toBeGreaterThan(0);
+    }
   });
 
   it("names where each final choice came from", async () => {
