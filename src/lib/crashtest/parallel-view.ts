@@ -64,7 +64,7 @@ export interface SummaryView {
   stable: boolean;
   /** The plan shown leads only on the evidence order (no stable blind verdict): for a person to confirm. */
   provisional: boolean;
-  /** "Best complete plan" for a stable verdict, "Provisional plan" otherwise. */
+  /** "Best complete plan", "Provisional plan", or "Insufficient Qloo evidence". */
   headline: string;
   stability: string;
   hardConstraints: { passed: number; total: number };
@@ -234,20 +234,30 @@ export function parallelView(state: RunState): ParallelView | null {
   });
 
   const states = F ? Object.values(p.matrix.componentStates[F.candidateId] ?? {}) : [];
+  const supportedCount = states.filter((s) => s === "supported").length;
+  // A consistent ordering is not the same as evidential support. Keep the proposed plan visible as
+  // a hypothesis, but never present a zero-support winner as a validated recommendation.
+  const evidenceInsufficient = !!F && supportedCount === 0;
   const hardTotal = state.brief.constraints.filter((c) => c.kind === "hard").length;
   const violations = p.verdict.evaluation?.hardConstraintViolations.length ?? 0;
   const v = p.verdict;
   const audit = p.stability;
   // Recordings from before parallel:v3 don't carry the flag; the same rule applies to them.
-  const provisional = v.provisional ?? (!!F && v.decidedBy === "evidence_order");
+  const provisional = evidenceInsufficient || (v.provisional ?? (!!F && v.decidedBy === "evidence_order"));
   const summary: SummaryView = {
     winner: F ? WINNER_TEXT[F.track] : "No recommendation",
     winnerTrack: F ? TRACK_LETTER[F.track] : null,
     verdict: VERDICT_TEXT[v.verdict],
-    stable: v.stable,
+    stable: v.stable && !evidenceInsufficient,
     provisional,
-    headline: provisional ? "Provisional plan" : "Best complete plan",
-    stability: audit?.reversed
+    headline: evidenceInsufficient
+      ? "Insufficient Qloo evidence"
+      : provisional
+        ? "Provisional plan"
+        : "Best complete plan",
+    stability: evidenceInsufficient
+      ? "Insufficient evidence: Qloo did not support any choice in this plan. Treat it as a hypothesis for human validation, not a validated recommendation."
+      : audit?.reversed
       ? `Provisional: ${audit.reversed} evidence stress test${audit.reversed === 1 ? "" : "s"} selected a different finalist; a person should review it before relying on it.`
       : v.stable && audit?.robust
         ? `Stable: all ${audit.completed} recorded stability checks preserved the recommendation.`
@@ -267,7 +277,7 @@ export function parallelView(state: RunState): ParallelView | null {
     hardConstraints: { passed: F ? hardTotal - violations : 0, total: hardTotal },
     coverage: F ? (p.matrix.coverageByCandidate[F.candidateId] ?? 0) : 0,
     counts: {
-      supported: states.filter((s) => s === "supported").length,
+      supported: supportedCount,
       thin: states.filter((s) => s === "plausible_thin").length,
       unverified: states.filter((s) => s === "unverified").length,
       needsHuman: states.filter((s) => s === "needs_human").length,

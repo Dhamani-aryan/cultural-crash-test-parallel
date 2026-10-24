@@ -32,8 +32,10 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * search, challenges its own weakest choice, and an unstable verdict is shown as provisional.
  * v4: the final recommendation is stress-tested against blind order and leave-one-audience-anchor-out
  * re-evaluations; a reversal is surfaced as provisional instead of hidden behind a single verdict.
+ * v5: explicit brief contradictions and structured role doubts rank ahead of raw affinity, so
+ * several unrelated positive claims cannot hide one narratively wrong component.
  */
-export const PARALLEL_VERSION = "parallel:v4";
+export const PARALLEL_VERSION = "parallel:v5";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
@@ -41,10 +43,12 @@ export const PARALLEL_VERSION = "parallel:v4";
  * which distinctiveness ranks plans only when the brief asks for it. v3: a venue Qloo files under
  * the named neighbourhood is in it, and coordinates are read where Qloo returns them. v4: the
  * named neighbourhood ranks with brief fit, above audience affinity, and 2–6 km from it is outside it.
+ * v5: minimize explicit brief contradictions and structured role doubts before positive fit and
+ * affinity; positive claims can no longer cancel a material mismatch in another slot.
  */
-export const EVIDENCE_RUBRIC_VERSION = "evidence:v4";
-/** The blind, order-rotated adjudication protocol. */
-export const ADJUDICATION_VERSION = "adjudicate:v1";
+export const EVIDENCE_RUBRIC_VERSION = "evidence:v5";
+/** The blind, order-rotated adjudication protocol. v2 gives contradictions and role doubts priority over affinity. */
+export const ADJUDICATION_VERSION = "adjudicate:v2";
 
 /** The architecture a run uses: the explicit option, else RECOMMENDATION_ARCHITECTURE, else the default. */
 export function architectureFrom(option?: Architecture): Architecture {

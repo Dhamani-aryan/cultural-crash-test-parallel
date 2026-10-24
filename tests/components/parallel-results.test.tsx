@@ -91,6 +91,25 @@ describe("parallel results", () => {
     expect(html).toMatch(/text-unresolved[^>]*>Needs human confirmation/);
   });
 
+  it("never presents a zero-support ordering as a validated best plan", async () => {
+    const state = await parallel();
+    const winner = state.parallel!.verdict.candidateId!;
+    state.parallel!.matrix.componentStates[winner] = Object.fromEntries(
+      Object.keys(state.parallel!.matrix.componentStates[winner] ?? {}).map((slot) => [
+        slot,
+        "unverified",
+      ]),
+    );
+    const view = parallelView(state)!;
+    expect(view.summary).toMatchObject({
+      headline: "Insufficient Qloo evidence",
+      stable: false,
+      provisional: true,
+      counts: { supported: 0 },
+    });
+    expect(view.summary.stability).toMatch(/hypothesis for human validation/);
+  });
+
   it("22. a replayed (serialised) state gives the same comparison, decision path and report", async () => {
     const state = await parallel(LONDON_BRIEF, {}, { noCandidates: ["brand"] });
     const replayed = JSON.parse(

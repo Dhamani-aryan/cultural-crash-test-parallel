@@ -572,6 +572,10 @@ export function selectionFlags(plan: CulturalPlan, screensOf: (c: Component) => 
       intent += 1;
       notes.push({ slot: c.slot, label: c.label, why: "a top-0.5% mainstream default, and the brief asks for independent or non-generic choices" });
     }
+    if (!user && s.brief === "flag") {
+      intent += 1;
+      notes.push({ slot: c.slot, label: c.label, why: s.notes.find((note) => note.startsWith("avoided:")) ?? "it matches a quality the brief asks to avoid" });
+    }
     if (!user && (s.hood === "outside" || s.hood === "far")) {
       intent += 1;
       notes.push({ slot: c.slot, label: c.label, why: `outside ${contract.neighborhoods[0]?.value ?? "the neighbourhood the brief names"}` });

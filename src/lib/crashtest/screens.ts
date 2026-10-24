@@ -10,12 +10,13 @@ import { venueFormat } from "./repair";
  * "unknown" when the evidence isn't there. Soft screens shape ranking and explanations; the
  * hard rules of the brief are elsewhere and stay vetoes. v2: neighbourhood fit reads Qloo's own
  * neighbourhood label and the coordinates Qloo returns (v1 never received coordinates). v3: 2–6 km
- * from a named neighbourhood is outside it, not unknown. v4 (the agent's selection only; the
- * evidence matrix keeps evidence:v4's host rule): a collaboration brand must be a product brand by
- * Qloo's own tags, and a retail store, or a bar or restaurant when the brief isn't about food or a
- * party, is at most a possible host, never a preferred one.
+ * from a named neighbourhood is outside it, not unknown. v4: the agent's selection requires a
+ * collaboration brand to be a product brand by Qloo's own tags, and treats retail, or food and
+ * nightlife when the brief does not call for them, as at most possible hosts. v5 applies that same
+ * strict host reading to the evidence matrix for every track, so selection and adjudication cannot
+ * describe the same venue differently.
  */
-export const SCREENS_VERSION = "screens:v4";
+export const SCREENS_VERSION = "screens:v5";
 
 const cat = (c: string) => `urn:tag:category:place:${c}`;
 

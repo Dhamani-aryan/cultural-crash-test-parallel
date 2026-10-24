@@ -33,7 +33,7 @@ import {
 export const MIN_COVERAGE = 0.2;
 
 export const JUDGE_SYSTEM = `You compare anonymous launch plans for one brief, using only the numbered evidence claims given. Plans are labelled with random IDs that mean nothing, and their order is random. Decide which complete plan is best supported, or that they tie, or that the evidence is insufficient to say.
-Priority, in order: (1) keep what the brief asks for (its named and fixed choices, its rules) and prefer a complete plan over one with open choices; (2) audience fit and role fit; (3) local relevance and fit across the plan; (4) feasibility; (5) distinctiveness, only to separate otherwise equal plans.
+Priority, in order: (1) keep what the brief asks for (its named and fixed choices, its rules) and prefer a complete plan over one with open choices; (2) minimize explicit brief-fit contradictions and structured role doubts; (3) audience fit and positive role fit; (4) local relevance and fit across the plan; (5) feasibility; (6) distinctiveness, only to separate otherwise equal plans. Several unrelated positive affinity claims do not cancel one explicit contradiction. When otherwise comparable complete plans exist, do not choose a plan with a role doubt merely because it has stronger affinity.
 Unknown evidence is uncertainty, not failure; thin evidence is not a contradiction. Do not reward longer descriptions, more claims or the position a plan is shown in. Never predict or claim sales, attendance, engagement, revenue or success.
 Cite the claim IDs that decide your verdict and the strongest claims against the winner. Return a tie when the evidence doesn't separate the plans.`;
 

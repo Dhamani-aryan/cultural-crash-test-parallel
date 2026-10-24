@@ -694,7 +694,7 @@ export interface AgentRecord {
     | "repeated_plan"
     | "round_limit"
     | "budget";
-  /** screens:v4: what the agent's own screens say against the plan it kept. */
+  /** What the agent's own versioned screens say against the plan it kept. */
   selection?: import("./agent").SelectionFlags;
 }
 

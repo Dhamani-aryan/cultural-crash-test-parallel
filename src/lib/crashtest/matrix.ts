@@ -3,7 +3,7 @@ import type { QlooEntity } from "@/lib/qloo";
 import { unverifiableRules } from "./constraints";
 import type { IntentContract } from "./intent";
 import { fitsBrief, isFoodAndDrink, ruledOut, stem, venueFormat } from "./repair";
-import { avoidedMatch, centralityFlag, hostTier, mainstreamFlag, neighborhoodFit, type Centroid, type RoleCheck } from "./screens";
+import { avoidedMatch, centralityFlag, mainstreamFlag, neighborhoodFit, selectionHostTier, type Centroid, type RoleCheck } from "./screens";
 import {
   SLOTS,
   SLOT_LABEL,
@@ -276,7 +276,10 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
     const k = ctx.contract;
     if (k && fact) {
       if (slot === "event_place") {
-        const tier = hostTier(fact.tags.map((t) => t.id), k, food);
+        // Use the same strict host reading for every track that the agent uses while building its
+        // pool. A restaurant, shop or unrelated nightlife venue is merely possible unless the
+        // brief actually calls for it; affinity must not turn it into a showroom or gallery.
+        const tier = selectionHostTier(fact.tags.map((t) => t.id), k, food);
         if (tier !== "unsuitable")
           add(
             slot,
@@ -493,12 +496,12 @@ const net = (claims: EvidenceClaim[], dims: EvidenceDimension[]) =>
 const PREFERENCE: Partial<Record<RuleId, number>> = { "R-user-choice": 0.5, "R-user-considered": 0.25 };
 
 /**
- * The decision policy (evidence:v4) as a vector, compared left to right:
- *   1. hard failures; 2. explicit locks kept; 3. completeness; 4. role and brief fit (with the
- *   user's unlocked choices as weighted preferences, and the neighbourhood the brief names);
- *   5. audience support, counted per choice so one exceptional affinity can't make up for weak
- *   ones; 6. city locality;
- *   7. cross-component coherence; 8. distinctiveness; 9. evidence coverage, as confidence only.
+ * The decision policy (evidence:v5) as a vector, compared left to right:
+ *   1. hard failures; 2. explicit locks kept; 3. completeness; 4. fewest explicit brief-fit
+ *   contradictions; 5. fewest structured role doubts; 6. positive role and brief fit (with the
+ *   user's unlocked choices as weighted preferences); 7. audience support, counted per choice so
+ *   one exceptional affinity can't make up for weak ones; 8. city locality; 9. cross-component
+ *   coherence; 10. distinctiveness; 11. evidence coverage, as confidence only.
  */
 export function evidenceVector(m: EvidenceMatrix, candidateId: string): number[] {
   const mine = m.claims.filter((c) => c.candidateId === candidateId);
@@ -510,10 +513,20 @@ export function evidenceVector(m: EvidenceMatrix, candidateId: string): number[]
   const supportedAudience = new Set(audience.filter((c) => c.stance === "supports").map((c) => c.slot));
   // A neighbourhood the brief names is part of the brief, so it ranks with brief fit, above affinity.
   const hood = mine.filter((c) => c.ruleId === "R-neighborhood");
+  // One material mismatch must not be cancelled by several unrelated positive claims. These stay
+  // ordinary evidence claims (not hard failures), but plans with fewer contradictions rank first.
+  const briefContradictions = mine.filter((c) => c.stance === "contradicts" && (c.dimension === "role_fit" || c.ruleId === "R-neighborhood")).length;
+  const roleDoubts = mine.filter(
+    (c) =>
+      c.stance === "unknown" &&
+      (c.ruleId === "R-role-check" || c.ruleId === "R-host-tier"),
+  ).length;
   return [
     -(m.hardFailures[candidateId]?.length ?? 0),
     locks.filter((c) => c.stance === "supports").length - locks.filter((c) => c.stance === "contradicts").length,
     m.completenessByCandidate[candidateId] ?? 0,
+    briefContradictions ? -briefContradictions : 0,
+    roleDoubts ? -roleDoubts : 0,
     net(mine, ["role_fit"]) + preference + net(hood, ["local"]),
     -(choices.size - supportedAudience.size),
     net(mine.filter((c) => !hood.includes(c)), ["local"]),

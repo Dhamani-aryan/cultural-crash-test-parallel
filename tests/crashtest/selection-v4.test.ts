@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agentKey, selectionFlags, type SelectionFlags } from "@/lib/crashtest/agent";
 import { compileIntent } from "@/lib/crashtest/intent";
-import { compareVectors } from "@/lib/crashtest/matrix";
+import { compareVectors, evidenceVector } from "@/lib/crashtest/matrix";
 import { runCrashTest } from "@/lib/crashtest/run";
 import { brandRole, hostTier, selectionHostTier } from "@/lib/crashtest/screens";
 import { LaunchBriefSchema, type Component, type LaunchBriefInput, type PoolRecord, type RunState } from "@/lib/crashtest/types";
@@ -40,7 +40,7 @@ describe("screens:v4: the agent's venue tier", () => {
   const pop = contractOf();
   const party = contractOf({ sourceText: "A launch party with a DJ set." });
   it("never prefers a retail store, nor a bar when the brief isn't about food, drink or a party", () => {
-    // The evidence matrix's rule (evidence:v4) is unchanged: a pop-up still lists shops as preferred there.
+    // The evidence matrix's host rule is unchanged: a pop-up still lists shops as preferred there.
     expect(hostTier([place("clothing_store")], pop, false)).toBe("preferred");
     expect(selectionHostTier([place("clothing_store")], pop, false)).toBe("possible");
     expect(selectionHostTier([place("body_piercing_shop")], pop, false)).toBe("unknown");
@@ -137,6 +137,17 @@ describe("screens:v4: selection", () => {
     expect(selectionFlags(locked, (c) => by[c.label], indie)).toMatchObject({ intent: 0, role: 0, guard: null });
   });
 
+  it("flags an agent choice that matches a quality the brief explicitly avoids", () => {
+    const plan = { anchors: [], components: [comp("brand_collaboration", "Beach Brand", 0.8)] };
+    const flagged = screens({ brief: "flag", notes: ["avoided: beach-party aesthetic"] });
+    expect(selectionFlags(plan, () => flagged, indie)).toMatchObject({
+      intent: 1,
+      notes: [{ slot: "brand_collaboration", label: "Beach Brand", why: "avoided: beach-party aesthetic" }],
+    });
+    const user = { ...plan, components: plan.components.map((c) => ({ ...c, origin: "user_provided" as const })) };
+    expect(selectionFlags(user, () => flagged, indie).intent).toBe(0);
+  });
+
   it("rejects a narratively generic bundle: two prestige defaults, or one with nothing local", () => {
     const flags = (pops: number[], local: boolean[]) =>
       selectionFlags(
@@ -148,6 +159,55 @@ describe("screens:v4: selection", () => {
     expect(flags([0.999, 0.9, 0.9], [false, false, false])).toBe("a global prestige default and nothing local");
     expect(flags([0.999, 0.9, 0.9], [false, true, false])).toBeNull();
     expect(flags([0.99, 0.98, 0.9], [false, false, false])).toBeNull();
+  });
+});
+
+describe("evidence:v5: material contradictions cannot be averaged away", () => {
+  let claimNumber = 0;
+  const claim = (candidateId: string, dimension: string, stance: string, ruleId?: string) => ({
+    candidateId,
+    slot: "event_place",
+    ruleId,
+    dimension,
+    stance,
+    strength: "moderate",
+    claimId: `${candidateId}/${dimension}/${ruleId ?? stance}/${++claimNumber}`,
+    claim: "",
+    evidenceIds: [],
+    limitations: [],
+  });
+  const matrix = (claims: ReturnType<typeof claim>[]) => ({
+    claims,
+    hardFailures: { coherent: [], contradictory: [], certain: [], doubtful: [] },
+    completenessByCandidate: { coherent: 1, contradictory: 1, certain: 1, doubtful: 1 },
+    coverageByCandidate: { coherent: 0.7, contradictory: 1, certain: 0.7, doubtful: 1 },
+  }) as unknown as Parameters<typeof evidenceVector>[0];
+
+  it("prefers a coherent plan over one with more affinity but an explicit brief contradiction", () => {
+    const m = matrix([
+      claim("coherent", "entity", "supports"),
+      claim("coherent", "audience", "supports"),
+      claim("contradictory", "entity", "supports"),
+      claim("contradictory", "audience", "supports"),
+      claim("contradictory", "local", "supports"),
+      claim("contradictory", "coherence", "supports"),
+      claim("contradictory", "role_fit", "contradicts", "R-avoid"),
+    ]);
+    expect(compareVectors(evidenceVector(m, "coherent"), evidenceVector(m, "contradictory"))).toBeGreaterThan(0);
+  });
+
+  it("ranks a structured role doubt below no doubt without calling it a contradiction", () => {
+    const m = matrix([
+      claim("certain", "entity", "supports"),
+      claim("doubtful", "entity", "supports"),
+      claim("doubtful", "role_fit", "unknown", "R-host-tier"),
+    ]);
+    const certain = evidenceVector(m, "certain");
+    const doubtful = evidenceVector(m, "doubtful");
+    expect(certain[3]).toBe(0);
+    expect(doubtful[3]).toBe(0);
+    expect(doubtful[4]).toBe(-1);
+    expect(compareVectors(certain, doubtful)).toBeGreaterThan(0);
   });
 });
 

@@ -1,49 +1,44 @@
-# Parallel v4 evaluation status
+# Parallel v4 final evaluation
 
 **Date:** 24 October 2026  
 **Run tag:** `parallel-v4-final-r1`  
 **Run version:** `crash:v15+parallel:v4`  
 **Audience anchors:** frozen from `parallel-v2 (crash:v15+parallel:v2)`
 
-## Status
+## Decision
 
-The promotion run is incomplete because the ChatGPT Plus model provider returned `usage_limit_reached` after four scenarios. Those 11 rows are infrastructure failures, not recommendation outcomes, and must not be included in accuracy or win-rate claims. The runner preserved each error honestly and did not manufacture plans.
+Do **not** promote v4 as the final recommendation engine. The full run completed with 15 valid scenarios and no infrastructure errors, but it failed the pre-declared promotion gates. Keep its stability audit; continue improving the selection policy from the observed failure patterns.
 
-An active Codex heartbeat named **Complete v4 evaluation** will retry only the failed scenario IDs after the usage window clears. It must not rerun the four valid cases or overwrite a frozen baseline.
+The retry automation has been paused because the run is complete.
 
-## Valid results so far
+## Full results
 
-| Scenario | Supported choices | Final track | Blind verdict | Stability audit |
-|---|---:|---|---|---|
-| Streetwear — New York | 1 → 2 | Agent | Winner, stable | 5/5 preserved |
-| Speakeasy — New York | 1 → 3 | Agent | Winner, stable | 5/5 preserved |
-| Luxury handbags — London | 0 → 3 | Agent by evidence order | Unstable, provisional | 3/5 preserved; two blind-order reversals; all three anchor dropouts preserved |
-| Non-alcoholic aperitivo — London | 1 → 2 | Agent | Winner, stable | 5/5 preserved |
+- Initial → final supported choices: **18 → 40 of 60**.
+- Improved: **13/15**; unchanged: **2/15**; regressed: **0/15**.
+- Final track: agent **13**, hybrid **2**, LLM **0**, user **0**.
+- Stable: **10/15**; provisional: **5/15**.
+- Stability checks: **61/68 preserved**, **5 blind-order reversals**, **2 anchor-dropout reversals**.
+- Qloo requests: **3,502**; model calls: **202**.
+- Hard-constraint violations: **0**; locked choices preserved.
+- One zero-support final plan: `accessories-mumbai`.
 
-Partial aggregate (four valid cases only):
+Against the frozen v2 baseline, v4 had **40/60** supported choices versus **45/60** for v2. In the blinded v4-versus-v2 comparison, v4 won 4, v2 won 2, and 9 tied, with 9 order disagreements. Against its own LLM-only plan, the no-evidence intuitive judge preferred the agent once, the LLM 12 times, and tied twice. This exposes a real product weakness: stronger affinity evidence did not always produce a more narratively coherent brief fit.
 
-- supported choices: **3 → 10**;
-- final agent track: **4/4**;
-- stable non-provisional verdicts: **3/4**;
-- recorded checks preserved: **18/20**;
-- anchor-dropout reversals: **0**;
-- blind-order reversals: **2**, both in the London luxury case;
-- outbound Qloo requests: **863**;
-- model calls: **52**.
+## Failure patterns
 
-These figures are promising but are not the final 15-scenario result.
+The repeated failures were not city-wide accuracy failures. They were specific decision-policy failures:
 
-## Concrete finding
+1. A role-doubtful venue could win because several affinity/locality claims outweighed the doubt.
+2. One explicit avoided-quality or neighbourhood contradiction could be averaged away by unrelated positive claims.
+3. Generic or corporate collaborators could outscore locally coherent choices.
+4. The agent sometimes changed a reasonable user/LLM choice without enough narrative benefit.
+5. Mumbai accessories exposed a Qloo coverage gap; more looping did not create evidence.
 
-The London luxury case proves the stability layer is doing useful work. The two blind orders selected different plans, while the evidence-order recommendation survived all three audience-anchor removals. The UI correctly presents it as a **Provisional plan** and asks for human review instead of claiming a stable winner.
+These findings motivated the bounded v5 experiment. They do not justify rerunning stable scenarios after every change.
 
-During review, one duplicate human check was found: order instability also produced an audience-definition warning even though no anchor-dropout check reversed. The controller now adds the audience warning only for actual anchor-dropout reversals; order instability keeps its own targeted warning.
+## Artifacts
 
-## Promotion gate still required
-
-1. Complete the remaining 11 scenarios under the same tag and frozen anchors.
-2. Exclude every provider or infrastructure error from outcome metrics.
-3. Inspect every unstable, tied, provisional, budget-limited, or support-regressing case.
-4. Complete the blinded human review before opening its key.
-5. Compare v4 with `scenario-summary-parallel-v3-final-r1.json` on support, judge preference, stability, failures and cost.
-6. Promote v4 only if the full evidence is favorable; otherwise keep the v3 baseline and retain the stability audit as an experimental branch.
+- `eval/out/final-report-parallel-v4-final-r1.md`
+- `eval/out/final-report-parallel-v4-final-r1.json`
+- `eval/out/final-human-review-parallel-v4-final-r1.json`
+- The separate `-key.json` remains unopened until human review is complete.
