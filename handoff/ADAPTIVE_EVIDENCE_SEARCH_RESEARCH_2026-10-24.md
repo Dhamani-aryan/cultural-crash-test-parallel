@@ -2,8 +2,14 @@
 
 **Date:** 24 October 2026  
 **Repository:** `cultural-crash-test-parallel`  
-**Status:** research recommendation; implement only as a measured experiment behind a flag  
+**Status:** P1 finalist stability audit implemented as `parallel:v4`; broader retrieval-lane and value-of-information work remains experimental
 **Decision:** keep the single evidence agent. Add an uncertainty-and-stability controller around its existing search rather than adding more agents.
+
+### Implemented and smoke-tested
+
+`parallel:v4` implements the bounded first slice: two existing blind-order checks plus leave-one-anchor-out re-tests of the winner and strongest distinct runner-up, capped at three anchors and charged to the normal Qloo budget. A reversal makes the recommendation provisional and creates a human check. The result UI and Markdown report expose every check.
+
+Live smoke test on `non-alcoholic-london`, using the frozen `parallel-v2` audience anchors: 1→3 supported choices, evidence-agent winner, 5/5 checks preserved, 0 ties, 0 reversals, 234 outbound Qloo requests. The prior stochastic v3 run used 217 requests; the 17-request difference is the whole-run delta, not a causal estimate of the audit's cost. This is one scenario, not a promotion evaluation; the 15-scenario blinded review remains the promotion gate.
 
 ## Executive finding
 

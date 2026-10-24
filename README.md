@@ -15,10 +15,16 @@ Built for the **Qloo Agentic Hackathon 2026**.
 ## How it works
 
 ```
-conversation ─► confirmed brief ─► draft (model alone) ─► resolve in Qloo ─► test every choice ─► accepted? ──► compare + report
-                                                                               ▲                   │ no
-                                                                               └─ re-test ◄─ repair the weakest one
+                                      ┌─► your plan as stated ──────────────┐
+conversation ─► frozen brief ─────────┼─► LLM-only plan ───────────────────┼─► shared evidence matrix
+                                      └─► evidence agent + Qloo search ────┘             │
+                                                                                         ▼
+                                  stability-qualified verdict ◄─ finalist stress tests ◄─ blind comparison
 ```
+
+The three plans are genuinely independent: the LLM-only track never sees Qloo, and the evidence agent never sees the LLM draft. The agent pools candidates from several Qloo retrieval views, screens them against the brief, tests a bounded set of complete plans, and challenges its own weakest supported choice. Every plan is then evaluated by the same evidence rules and compared under anonymous IDs in two presentation orders.
+
+Before a recommendation is called stable, `parallel:v4` stress-tests the winner against its strongest distinct runner-up. It reuses the two blind-order judgments, then removes up to three audience anchors one at a time and re-tests both complete plans through Qloo. The result screen reports how many checks preserved, tied, or reversed the decision. Any reversal turns the headline into **Provisional plan** and creates a targeted human check; missing evidence is never silently converted into failure.
 
 - **Intake** ([`src/lib/intake/`](src/lib/intake/)). A chat, like ChatGPT. You describe the launch in your own words, answer any follow-up questions, or say "figure out the rest" to have the assistant make (and state) the assumptions.
   - The model reads only the facts you state into a "What I understand" brief. Each field is labelled *from you*, *suggested* or *confirmed*, and you can edit it.
@@ -27,7 +33,7 @@ conversation ─► confirmed brief ─► draft (model alone) ─► resolve in
   - Choices can be marked *Booked/fixed*, and an *Explore better-supported alternatives to my choices* switch is off by default.
   - Nothing runs until you confirm the brief, and the server re-checks that before any Qloo call.
 
-- **Draft.** The model turns the brief into a first plan from general knowledge. This is also the LLM-only baseline.
+- **Independent plans.** The user's choices, an LLM-only draft, and the evidence-first agent's plan are built in parallel from the same frozen brief. The final plan can also be a fully re-tested hybrid when its complete evidence record materially beats the original tracks.
 - **Resolve.** Every name is looked up in Qloo. A name Qloo doesn't know is marked *Unresolved*, never tested as if it were real. The creative direction is mapped onto Qloo's own aesthetic and tone tags.
 - **Test.** Every choice is scored with the deterministic, versioned rubric `crash-v1` ([`evaluate.ts`](src/lib/crashtest/evaluate.ts)):
 

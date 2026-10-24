@@ -30,8 +30,10 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * v3: one evidence agent, independent of the user's unlocked choices, pools diverse Qloo candidates
  * per slot, screens them against the brief-intent contract, tests complete plans by bounded beam
  * search, challenges its own weakest choice, and an unstable verdict is shown as provisional.
+ * v4: the final recommendation is stress-tested against blind order and leave-one-audience-anchor-out
+ * re-evaluations; a reversal is surfaced as provisional instead of hidden behind a single verdict.
  */
-export const PARALLEL_VERSION = "parallel:v3";
+export const PARALLEL_VERSION = "parallel:v4";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,

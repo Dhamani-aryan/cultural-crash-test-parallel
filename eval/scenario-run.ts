@@ -30,13 +30,24 @@ import { withCache } from "../src/lib/qloo/cached";
 const intakeFile = "eval/out/scenario-intake.json";
 if (!existsSync(intakeFile)) throw new Error("Run npm run scenario:intake first.");
 const input = JSON.parse(readFileSync(intakeFile, "utf8")) as {
-  rows: { id: string; title: string; readyForReview?: boolean; state?: IntakeState; error: string | null }[];
+  rows: {
+    id: string;
+    title: string;
+    readyForReview?: boolean;
+    state?: IntakeState;
+    error: string | null;
+  }[];
 };
 const only = new Set(process.argv.slice(2).filter((x) => x !== "--"));
 const frozenAnchors = process.env.FROZEN_ANCHORS
-  ? (JSON.parse(readFileSync(process.env.FROZEN_ANCHORS, "utf8")) as { from: string; scenarios: Record<string, { anchors: EntityRef[]; source: "user" | "model_hypothesis" }> })
+  ? (JSON.parse(readFileSync(process.env.FROZEN_ANCHORS, "utf8")) as {
+      from: string;
+      scenarios: Record<string, { anchors: EntityRef[]; source: "user" | "model_hypothesis" }>;
+    })
   : null;
-const selected = input.rows.filter((row) => row.readyForReview && row.state && (!only.size || only.has(row.id)));
+const selected = input.rows.filter(
+  (row) => row.readyForReview && row.state && (!only.size || only.has(row.id)),
+);
 if (!selected.length) throw new Error("No review-ready scenarios selected.");
 
 const qlooStats = { hits: 0, requests: 0 };
@@ -56,24 +67,34 @@ const suffix = process.env.SCENARIO_TAG ?? (ARCHITECTURE === "parallel" ? "paral
 const directory = `eval/out/scenario-runs${suffix ? `-${suffix}` : ""}`;
 const summaryFile = `eval/out/scenario-summary${suffix ? `-${suffix}` : ""}.json`;
 // A frozen baseline is never written to, and one directory never mixes agent versions.
-const refusal = outputRefusal({ directory, summaryFile, runVersion: RUN_VERSION, frozen: isFrozen, existing: existingVersions(directory) });
+const refusal = outputRefusal({
+  directory,
+  summaryFile,
+  runVersion: RUN_VERSION,
+  frozen: isFrozen,
+  existing: existingVersions(directory),
+});
 if (refusal) throw new Error(refusal);
 mkdirSync(directory, { recursive: true });
 type SavedSummary = { id: string; [key: string]: unknown };
 const previous = existsSync(summaryFile)
-  ? (JSON.parse(readFileSync(summaryFile, "utf8")) as { summaries?: SavedSummary[] }).summaries ?? []
+  ? ((JSON.parse(readFileSync(summaryFile, "utf8")) as { summaries?: SavedSummary[] }).summaries ??
+    [])
   : [];
 const summaries = new Map(previous.map((summary) => [summary.id, summary]));
 
 const labels = (state: RunState | null) =>
-  Object.fromEntries((state?.plan?.components ?? []).map((component) => [component.slot, component.label]));
+  Object.fromEntries(
+    (state?.plan?.components ?? []).map((component) => [component.slot, component.label]),
+  );
 
 for (const row of selected) {
   process.stdout.write(`${row.id} … `);
   const started = Date.now();
   try {
     const frozen = frozenAnchors?.scenarios[row.id];
-    if (frozenAnchors && !frozen) throw new Error(`${process.env.FROZEN_ANCHORS} has no anchors for ${row.id}`);
+    if (frozenAnchors && !frozen)
+      throw new Error(`${process.env.FROZEN_ANCHORS} has no anchors for ${row.id}`);
     const state = await runCrashTest(deps, toLaunchBrief(row.state!), {
       runVersion: RUN_VERSION,
       architecture: ARCHITECTURE,
@@ -90,26 +111,63 @@ for (const row of selected) {
       ms: Date.now() - started,
       initialSupported: first?.supported ?? null,
       finalSupported: last?.supported ?? null,
-      initial: Object.fromEntries((state.initialPlan?.components ?? []).map((component) => [component.slot, component.label])),
+      initial: Object.fromEntries(
+        (state.initialPlan?.components ?? []).map((component) => [component.slot, component.label]),
+      ),
       final: labels(state),
-      accepted: state.changes.filter((change) => !change.reverted).map((change) => ({ slot: change.slot, before: change.before, after: change.after, reason: change.reason })),
-      rejected: state.changes.filter((change) => change.reverted).map((change) => ({ slot: change.slot, before: change.before, after: change.after, outcome: change.retest?.rejectionCode })),
+      accepted: state.changes
+        .filter((change) => !change.reverted)
+        .map((change) => ({
+          slot: change.slot,
+          before: change.before,
+          after: change.after,
+          reason: change.reason,
+        })),
+      rejected: state.changes
+        .filter((change) => change.reverted)
+        .map((change) => ({
+          slot: change.slot,
+          before: change.before,
+          after: change.after,
+          outcome: change.retest?.rejectionCode,
+        })),
       unresolved: state.unresolvedQuestions,
       qlooChecks: state.qlooCallsUsed,
       modelCalls: state.llmCalls,
-      error: state.stopReason === "error" ? state.stopDetail ?? "unknown error" : null,
+      error: state.stopReason === "error" ? (state.stopDetail ?? "unknown error") : null,
       ...(state.parallel
         ? {
             // A parallel run changes plans through hybrids, re-tested as complete plans.
-            accepted: state.parallel.rounds.flatMap((r) => r.attempts.filter((a) => a.accepted).map((a) => ({ slot: a.slot ?? null, after: a.candidateId, reason: a.reason }))),
+            accepted: state.parallel.rounds.flatMap((r) =>
+              r.attempts
+                .filter((a) => a.accepted)
+                .map((a) => ({ slot: a.slot ?? null, after: a.candidateId, reason: a.reason })),
+            ),
             rejected: state.parallel.rounds.flatMap((r) =>
-              r.attempts.filter((a) => !a.accepted && a.rejectionCode !== "duplicate").map((a) => ({ slot: a.slot ?? null, after: a.candidateId, outcome: a.rejectionCode })),
+              r.attempts
+                .filter((a) => !a.accepted && a.rejectionCode !== "duplicate")
+                .map((a) => ({
+                  slot: a.slot ?? null,
+                  after: a.candidateId,
+                  outcome: a.rejectionCode,
+                })),
             ),
             winner: state.parallel.verdict.candidateId,
             winnerTrack: state.parallel.verdict.track,
             verdict: state.parallel.verdict.verdict,
             stable: state.parallel.verdict.stable,
             provisional: state.parallel.verdict.provisional,
+            stability: state.parallel.stability
+              ? {
+                  completed: state.parallel.stability.completed,
+                  preserved: state.parallel.stability.preserved,
+                  tied: state.parallel.stability.tied,
+                  reversed: state.parallel.stability.reversed,
+                  unavailable: state.parallel.stability.unavailable,
+                  robust: state.parallel.stability.robust,
+                  budgetLimited: state.parallel.stability.budgetLimited,
+                }
+              : null,
             usage: state.parallel.usage,
             qlooRequests: state.qlooUsage?.requests ?? null,
             cacheHits: state.qlooUsage?.cacheHits ?? null,
@@ -118,8 +176,11 @@ for (const row of selected) {
                   agent: {
                     stop: state.parallel.agent.stop,
                     bundlesTested: state.parallel.agent.bundlesTested,
-                    challengesAccepted: state.parallel.agent.rounds.filter((r) => r.accepted).length,
-                    challengesRejected: state.parallel.agent.rounds.flatMap((r) => r.attempts.filter((a) => !a.accepted).map((a) => a.rejectionCode)),
+                    challengesAccepted: state.parallel.agent.rounds.filter((r) => r.accepted)
+                      .length,
+                    challengesRejected: state.parallel.agent.rounds.flatMap((r) =>
+                      r.attempts.filter((a) => !a.accepted).map((a) => a.rejectionCode),
+                    ),
                   },
                   config: state.parallel.config,
                 }
@@ -130,15 +191,32 @@ for (const row of selected) {
     summaries.set(row.id, summary);
     console.log(
       `${summary.initialSupported}→${summary.finalSupported} supported; ${summary.accepted.length} accepted; ${summary.rejected.length} rejected; ${summary.unresolved.length} unresolved` +
-        (state.parallel ? `; final ${state.parallel.verdict.track ?? "none"} (${state.parallel.verdict.verdict}${state.parallel.verdict.stable ? ", stable" : ""})` : ""),
+        (state.parallel
+          ? `; final ${state.parallel.verdict.track ?? "none"} (${state.parallel.verdict.verdict}${state.parallel.verdict.stable ? ", stable" : ""})`
+          : ""),
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    summaries.set(row.id, { id: row.id, title: row.title, runVersion: RUN_VERSION, error: message, ms: Date.now() - started });
+    summaries.set(row.id, {
+      id: row.id,
+      title: row.title,
+      runVersion: RUN_VERSION,
+      error: message,
+      ms: Date.now() - started,
+    });
     console.log(`ERROR ${message}`);
   }
-  const ordered = input.rows.flatMap((candidate) => (summaries.has(candidate.id) ? [summaries.get(candidate.id)] : []));
-  writeFileSync(summaryFile, JSON.stringify({ ranAt: new Date().toISOString(), runVersion: RUN_VERSION, summaries: ordered }, null, 2));
+  const ordered = input.rows.flatMap((candidate) =>
+    summaries.has(candidate.id) ? [summaries.get(candidate.id)] : [],
+  );
+  writeFileSync(
+    summaryFile,
+    JSON.stringify(
+      { ranAt: new Date().toISOString(), runVersion: RUN_VERSION, summaries: ordered },
+      null,
+      2,
+    ),
+  );
 }
 
 console.log(`wrote ${summaryFile}`);

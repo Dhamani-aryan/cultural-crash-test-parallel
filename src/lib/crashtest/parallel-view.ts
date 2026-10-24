@@ -69,11 +69,24 @@ export interface SummaryView {
   stability: string;
   hardConstraints: { passed: number; total: number };
   coverage: number;
-  counts: { supported: number; thin: number; unverified: number; needsHuman: number; conflicting: number };
+  counts: {
+    supported: number;
+    thin: number;
+    unverified: number;
+    needsHuman: number;
+    conflicting: number;
+  };
   qlooChecks: number;
   modelCalls: number;
   assumptionsToConfirm: number;
   humanChecks: number;
+  stress: {
+    completed: number;
+    preserved: number;
+    tied: number;
+    reversed: number;
+    unavailable: number;
+  } | null;
 }
 
 export interface PathNode {
@@ -87,7 +100,18 @@ export interface PathNode {
 export interface PathEdge {
   source: string;
   target: string;
-  relation: "generated" | "evidence_for" | "supports" | "contradicts" | "uncertain" | "constrained_by" | "adjudicated" | "challenged" | "accepted_after_retest" | "rejected_after_retest" | "selected";
+  relation:
+    | "generated"
+    | "evidence_for"
+    | "supports"
+    | "contradicts"
+    | "uncertain"
+    | "constrained_by"
+    | "adjudicated"
+    | "challenged"
+    | "accepted_after_retest"
+    | "rejected_after_retest"
+    | "selected";
 }
 
 export interface ParallelView {
@@ -116,7 +140,15 @@ const claimView = (c: EvidenceClaim, decisive: Set<string>): ClaimView => ({
   claimId: c.claimId,
   dimension: EVIDENCE_DIMENSION_LABEL[c.dimension],
   text: c.claim,
-  source: c.source.startsWith("qloo") ? "Qloo" : c.source === "logical_rubric" ? "Rule" : c.source === "user" ? "Your brief" : c.source === "constraint" ? "Constraint" : "Qloo entity data",
+  source: c.source.startsWith("qloo")
+    ? "Qloo"
+    : c.source === "logical_rubric"
+      ? "Rule"
+      : c.source === "user"
+        ? "Your brief"
+        : c.source === "constraint"
+          ? "Constraint"
+          : "Qloo entity data",
   decisive: decisive.has(c.claimId),
   limitations: c.limitations,
   evidenceIds: c.evidenceIds,
@@ -128,10 +160,26 @@ function cell(p: ParallelResult, c: CandidatePlan | undefined, slot: Slot): Cell
   const open = c.open.find((o) => o.slot === slot);
   if (!comp)
     return open?.state === "not_specified"
-      ? { candidateId: c.candidateId, label: "Not specified", status: "You left this open", state: "not_specified" }
-      : { candidateId: c.candidateId, label: "Left open", status: "Nothing passed the screens", state: "abstained", note: open?.reason };
+      ? {
+          candidateId: c.candidateId,
+          label: "Not specified",
+          status: "You left this open",
+          state: "not_specified",
+        }
+      : {
+          candidateId: c.candidateId,
+          label: "Left open",
+          status: "Nothing passed the screens",
+          state: "abstained",
+          note: open?.reason,
+        };
   const st = p.matrix.componentStates[c.candidateId]?.[slot] ?? "unverified";
-  return { candidateId: c.candidateId, label: comp.label, status: COMPONENT_STATE_LABEL[st], state: st };
+  return {
+    candidateId: c.candidateId,
+    label: comp.label,
+    status: COMPONENT_STATE_LABEL[st],
+    state: st,
+  };
 }
 
 export function parallelView(state: RunState): ParallelView | null {
@@ -148,10 +196,21 @@ export function parallelView(state: RunState): ParallelView | null {
     const you = cell(p, U, slot);
     const llm = cell(p, L, slot);
     const agent = cell(p, A, slot);
-    const fin = F ? cell(p, F, slot) : { candidateId: null, label: "No recommendation", status: "Needs a person", state: "unverified" as const };
+    const fin = F
+      ? cell(p, F, slot)
+      : {
+          candidateId: null,
+          label: "No recommendation",
+          status: "Needs a person",
+          state: "unverified" as const,
+        };
     const source = F?.sources[slot] ? SOURCE_LABEL[F.sources[slot]!] : null;
-    const claims = F ? p.matrix.claims.filter((c) => c.candidateId === F.candidateId && c.slot === slot) : [];
-    const sameAs = (["you", "llm", "agent"] as const).filter((k) => ({ you, llm, agent })[k].label === fin.label && fin.candidateId);
+    const claims = F
+      ? p.matrix.claims.filter((c) => c.candidateId === F.candidateId && c.slot === slot)
+      : [];
+    const sameAs = (["you", "llm", "agent"] as const).filter(
+      (k) => ({ you, llm, agent })[k].label === fin.label && fin.candidateId,
+    );
     return {
       slot,
       title: SLOT_LABEL[slot],
@@ -178,6 +237,7 @@ export function parallelView(state: RunState): ParallelView | null {
   const hardTotal = state.brief.constraints.filter((c) => c.kind === "hard").length;
   const violations = p.verdict.evaluation?.hardConstraintViolations.length ?? 0;
   const v = p.verdict;
+  const audit = p.stability;
   // Recordings from before parallel:v3 don't carry the flag; the same rule applies to them.
   const provisional = v.provisional ?? (!!F && v.decidedBy === "evidence_order");
   const summary: SummaryView = {
@@ -187,15 +247,23 @@ export function parallelView(state: RunState): ParallelView | null {
     stable: v.stable,
     provisional,
     headline: provisional ? "Provisional plan" : "Best complete plan",
-    stability: v.stable
-      ? "Stable: the same verdict in both blind orders."
-      : v.verdict === "unstable"
-        ? `Unstable: the blind verdict changed with the order the plans were shown in.${provisional ? " This plan only leads on the evidence order; a person should review it before relying on it." : ""}`
-        : v.verdict === "tie"
-          ? `Tie: the blind judge found the plans level.${provisional ? " This plan only leads on the evidence order; a person should choose." : ""}`
-          : "No verdict: not enough evidence.",
+    stability: audit?.reversed
+      ? `Provisional: ${audit.reversed} evidence stress test${audit.reversed === 1 ? "" : "s"} selected a different finalist; a person should review it before relying on it.`
+      : v.stable && audit?.robust
+        ? `Stable: all ${audit.completed} recorded stability checks preserved the recommendation.`
+        : v.stable && audit
+          ? `Stable blind verdict; ${audit.preserved} of ${audit.completed} completed stress tests preserved it${audit.tied ? ` and ${audit.tied} produced a tie` : ""}.`
+          : v.stable
+            ? "Stable: the same verdict in both blind orders."
+            : v.verdict === "unstable"
+              ? `Unstable: the blind verdict changed with the order the plans were shown in.${provisional ? " This plan only leads on the evidence order; a person should review it before relying on it." : ""}`
+              : v.verdict === "tie"
+                ? `Tie: the blind judge found the plans level.${provisional ? " This plan only leads on the evidence order; a person should choose." : ""}`
+                : "No verdict: not enough evidence.",
     // A clarification left open (a delegated conflict, an unresolved identity) names the one check that could change the plan.
-    ...(state.clarification?.provisional.length && F ? { stability: `Provisional: ${state.clarification.provisional[0]}` } : {}),
+    ...(state.clarification?.provisional.length && F
+      ? { stability: `Provisional: ${state.clarification.provisional[0]}` }
+      : {}),
     hardConstraints: { passed: F ? hardTotal - violations : 0, total: hardTotal },
     coverage: F ? (p.matrix.coverageByCandidate[F.candidateId] ?? 0) : 0,
     counts: {
@@ -209,6 +277,15 @@ export function parallelView(state: RunState): ParallelView | null {
     modelCalls: state.llmCalls,
     assumptionsToConfirm: v.assumptionsIntroduced.length,
     humanChecks: v.humanChecks.length,
+    stress: audit
+      ? {
+          completed: audit.completed,
+          preserved: audit.preserved,
+          tied: audit.tied,
+          reversed: audit.reversed,
+          unavailable: audit.unavailable,
+        }
+      : null,
   };
   return {
     summary,
@@ -221,18 +298,35 @@ export function parallelView(state: RunState): ParallelView | null {
 
 const nameOf = (p: ParallelResult, id: string | null) => {
   const c = id ? p.candidates.find((x) => x.candidateId === id) : undefined;
-  return c ? (c.track === "hybrid" ? `Hybrid ${c.candidateId.replace("hybrid-", "#")}` : TRACK_LABEL[c.track]) : "none";
+  return c
+    ? c.track === "hybrid"
+      ? `Hybrid ${c.candidateId.replace("hybrid-", "#")}`
+      : TRACK_LABEL[c.track]
+    : "none";
 };
 
 function adjudicationLine(r: ParallelResult["initial"], p: ParallelResult): string {
-  const out = r.verdict === "winner" ? `${nameOf(p, r.winnerCandidateId)} won in both blind orders.` : `${VERDICT_TEXT[r.verdict]}. ${r.rationale}`;
+  const out =
+    r.verdict === "winner"
+      ? `${nameOf(p, r.winnerCandidateId)} won in both blind orders.`
+      : `${VERDICT_TEXT[r.verdict]}. ${r.rationale}`;
   const gone = Object.keys(r.eliminated);
-  return gone.length ? `${out} Removed first for breaking the brief: ${gone.map((id) => nameOf(p, id)).join(", ")}.` : out;
+  return gone.length
+    ? `${out} Removed first for breaking the brief: ${gone.map((id) => nameOf(p, id)).join(", ")}.`
+    : out;
 }
 
 /** The decision path: three branches from the brief, evidence, adjudication, hybrids and the final verdict. */
 function decisionPath(state: RunState, p: ParallelResult): ParallelView["path"] {
-  const nodes: PathNode[] = [{ id: "brief", kind: "brief", label: "Your brief", detail: `Frozen as ${p.briefFingerprint}; ${state.brief.constraints.filter((c) => c.kind === "hard").length} hard rule(s)`, state: "neutral" }];
+  const nodes: PathNode[] = [
+    {
+      id: "brief",
+      kind: "brief",
+      label: "Your brief",
+      detail: `Frozen as ${p.briefFingerprint}; ${state.brief.constraints.filter((c) => c.kind === "hard").length} hard rule(s)`,
+      state: "neutral",
+    },
+  ];
   const edges: PathEdge[] = [];
   for (const c of p.candidates.filter((x) => x.track !== "hybrid" && !x.parent)) {
     const id = `track:${c.candidateId}`;
@@ -250,19 +344,50 @@ function decisionPath(state: RunState, p: ParallelResult): ParallelView["path"] 
     const sup = claims.filter((x) => x.stance === "supports").length;
     const con = claims.filter((x) => x.stance === "contradicts").length;
     const unk = claims.filter((x) => x.stance === "unknown").length;
-    nodes.push({ id: ev, kind: "evidence", label: `Evidence for ${TRACK_LABEL[c.track]}`, detail: `${sup} supporting, ${con} contradicting, ${unk} unknown`, state: con ? "uncertain" : "supported" });
-    edges.push({ source: ev, target: id, relation: con ? "contradicts" : sup ? "supports" : "uncertain" });
+    nodes.push({
+      id: ev,
+      kind: "evidence",
+      label: `Evidence for ${TRACK_LABEL[c.track]}`,
+      detail: `${sup} supporting, ${con} contradicting, ${unk} unknown`,
+      state: con ? "uncertain" : "supported",
+    });
+    edges.push({
+      source: ev,
+      target: id,
+      relation: con ? "contradicts" : sup ? "supports" : "uncertain",
+    });
     if (hard.length) edges.push({ source: id, target: "brief", relation: "constrained_by" });
   }
-  nodes.push({ id: "adjudication:initial", kind: "adjudication", label: "Blind comparison", detail: adjudicationLine(p.initial, p), state: p.initial.verdict === "winner" ? "supported" : "uncertain" });
-  for (const c of p.candidates.filter((x) => x.track !== "hybrid" && !x.parent)) edges.push({ source: `track:${c.candidateId}`, target: "adjudication:initial", relation: "adjudicated" });
+  nodes.push({
+    id: "adjudication:initial",
+    kind: "adjudication",
+    label: "Blind comparison",
+    detail: adjudicationLine(p.initial, p),
+    state: p.initial.verdict === "winner" ? "supported" : "uncertain",
+  });
+  for (const c of p.candidates.filter((x) => x.track !== "hybrid" && !x.parent))
+    edges.push({
+      source: `track:${c.candidateId}`,
+      target: "adjudication:initial",
+      relation: "adjudicated",
+    });
   let last = "adjudication:initial";
   for (const r of p.rounds) {
     for (const a of r.attempts.filter((x) => x.rejectionCode !== "duplicate")) {
       const id = `hybrid:${a.candidateId}`;
-      nodes.push({ id, kind: "hybrid", label: `${a.kind === "search" ? "Targeted search" : a.kind === "union" ? "Strongest-component hybrid" : "Swap"}${a.slot ? ` · ${SLOT_LABEL[a.slot]}` : ""}`, detail: a.reason, state: a.accepted ? "accepted" : "rejected" });
+      nodes.push({
+        id,
+        kind: "hybrid",
+        label: `${a.kind === "search" ? "Targeted search" : a.kind === "union" ? "Strongest-component hybrid" : "Swap"}${a.slot ? ` · ${SLOT_LABEL[a.slot]}` : ""}`,
+        detail: a.reason,
+        state: a.accepted ? "accepted" : "rejected",
+      });
       edges.push({ source: last, target: id, relation: "challenged" });
-      edges.push({ source: id, target: "final", relation: a.accepted ? "accepted_after_retest" : "rejected_after_retest" });
+      edges.push({
+        source: id,
+        target: "final",
+        relation: a.accepted ? "accepted_after_retest" : "rejected_after_retest",
+      });
     }
     if (r.accepted) last = `hybrid:${r.accepted}`;
   }
@@ -282,7 +407,8 @@ function decisionPath(state: RunState, p: ParallelResult): ParallelView["path"] 
 export function toParallelMarkdown(state: RunState): string {
   const view = parallelView(state);
   const p = state.parallel;
-  if (!view || !p) return `# Crash test — ${state.marketLabel}\n\nThe run stopped before the plans could be compared.\n`;
+  if (!view || !p)
+    return `# Crash test — ${state.marketLabel}\n\nThe run stopped before the plans could be compared.\n`;
   const s = view.summary;
   const lines = [
     `# Crash test — ${state.marketLabel} (parallel)`,
@@ -293,32 +419,54 @@ export function toParallelMarkdown(state: RunState): string {
     "",
     "| Choice | You | LLM | Evidence-first agent | Final verdict |",
     "|---|---|---|---|---|",
-    ...view.rows.map((r) => `| ${r.title} | ${r.you.label} | ${r.llm.label} (${r.llm.status}) | ${r.agent.label} (${r.agent.status}) | **${r.final.label}** (${r.final.status}${r.final.source ? `, ${r.final.source.toLowerCase()}` : ""}) |`),
+    ...view.rows.map(
+      (r) =>
+        `| ${r.title} | ${r.you.label} | ${r.llm.label} (${r.llm.status}) | ${r.agent.label} (${r.agent.status}) | **${r.final.label}** (${r.final.status}${r.final.source ? `, ${r.final.source.toLowerCase()}` : ""}) |`,
+    ),
     "",
     `**First blind comparison:** ${view.initialVerdict}`,
     "",
     `**Final blind comparison:** ${view.finalVerdict}`,
+    ...(p.stability
+      ? [
+          "",
+          `**Recommendation stability:** ${p.stability.preserved}/${p.stability.completed} completed checks preserved the recommendation; ${p.stability.tied} tied; ${p.stability.reversed} reversed; ${p.stability.unavailable} unavailable.`,
+          ...p.stability.checks.map((c) => `- ${c.label}: ${c.outcome}. ${c.detail}`),
+        ]
+      : []),
     "",
     "## Why each choice stands",
     ...view.rows.flatMap((r) => [
       "",
       `### ${r.title}: ${r.final.label}`,
-      ...r.support.map((c) => `- Supports (${c.dimension}, ${c.source})${c.decisive ? " — decisive" : ""}: ${c.text}`),
+      ...r.support.map(
+        (c) =>
+          `- Supports (${c.dimension}, ${c.source})${c.decisive ? " — decisive" : ""}: ${c.text}`,
+      ),
       ...r.counter.map((c) => `- Against (${c.dimension}, ${c.source}): ${c.text}`),
       ...r.uncertain.map((c) => `- Unknown (${c.dimension}): ${c.text}`),
     ]),
     "",
     "## User choices preserved",
-    ...(p.verdict.userChoicesPreserved.length ? p.verdict.userChoicesPreserved.map((u) => `- ${SLOT_LABEL[u.slot]} "${u.label}"${u.locked ? " (fixed)" : ""}: ${u.preserved ? "kept" : "replaced"}`) : ["- You named no choices."]),
+    ...(p.verdict.userChoicesPreserved.length
+      ? p.verdict.userChoicesPreserved.map(
+          (u) =>
+            `- ${SLOT_LABEL[u.slot]} "${u.label}"${u.locked ? " (fixed)" : ""}: ${u.preserved ? "kept" : "replaced"}`,
+        )
+      : ["- You named no choices."]),
     "",
     "## Assumptions introduced",
-    ...(p.verdict.assumptionsIntroduced.length ? p.verdict.assumptionsIntroduced.map((a) => `- ${a}`) : ["- None."]),
+    ...(p.verdict.assumptionsIntroduced.length
+      ? p.verdict.assumptionsIntroduced.map((a) => `- ${a}`)
+      : ["- None."]),
     "",
     "## Human checks still required",
     ...(p.verdict.humanChecks.length ? p.verdict.humanChecks.map((h) => `- ${h}`) : ["- None."]),
     "",
     "## Rejected alternatives",
-    ...p.verdict.rejectedAlternatives.map((r) => `- ${nameOf(p, r.candidateId)} (${r.candidateId}): ${r.reason}`),
+    ...p.verdict.rejectedAlternatives.map(
+      (r) => `- ${nameOf(p, r.candidateId)} (${r.candidateId}): ${r.reason}`,
+    ),
     "",
     "## Evidence limitations",
     ...p.verdict.evidenceLimitations.map((l) => `- ${l}`),

@@ -6,7 +6,12 @@ import type { Architecture } from "./version";
  * the report and the UI are rendered from it, never reconstructed from model text.
  */
 
-export const SLOTS = ["artist_music", "brand_collaboration", "event_place", "creative_direction"] as const;
+export const SLOTS = [
+  "artist_music",
+  "brand_collaboration",
+  "event_place",
+  "creative_direction",
+] as const;
 export type Slot = (typeof SLOTS)[number];
 
 export const SLOT_LABEL: Record<Slot, string> = {
@@ -171,11 +176,7 @@ export interface DimensionScore {
 }
 
 export type ComponentStatus =
-  | "supported"
-  | "weak"
-  | "no_support"
-  | "unresolved"
-  | "constraint_conflict";
+  "supported" | "weak" | "no_support" | "unresolved" | "constraint_conflict";
 
 export const STATUS_LABEL: Record<ComponentStatus, string> = {
   supported: "Supported",
@@ -267,7 +268,8 @@ export interface PlanChange {
 }
 
 /** A ranked list a candidate can come from. v1 uses one combined list; v2 retrieves each intention separately. */
-export type CandidateView = "combined" | "audience" | "local" | "coherence" | "proposals" | "neighborhood";
+export type CandidateView =
+  "combined" | "audience" | "local" | "coherence" | "proposals" | "neighborhood";
 
 /** One candidate the agent considered for a choice: screened out, not picked, or re-tested. */
 export interface CandidateTrial {
@@ -438,7 +440,13 @@ export interface CandidatePlan {
   assumptions: string[];
   /** Hybrids and alternatives: the candidate they were built from. */
   parent?: string;
-  provenance: { model?: string; qlooCalls: number; llmCalls: number; ms: number; generatedAt: string };
+  provenance: {
+    model?: string;
+    qlooCalls: number;
+    llmCalls: number;
+    ms: number;
+    generatedAt: string;
+  };
 }
 
 export const EVIDENCE_DIMENSIONS = [
@@ -484,7 +492,8 @@ export type EvidenceSource =
 export type ClaimStance = "supports" | "contradicts" | "unknown";
 
 /** Layer 6: what a person should make of one component. */
-export type ComponentState = "supported" | "plausible_thin" | "conflicting" | "unverified" | "needs_human" | "rejected";
+export type ComponentState =
+  "supported" | "plausible_thin" | "conflicting" | "unverified" | "needs_human" | "rejected";
 export const COMPONENT_STATE_LABEL: Record<ComponentState, string> = {
   supported: "Supported",
   plausible_thin: "Plausible but thin",
@@ -560,7 +569,42 @@ export interface AdjudicationResult {
   evidenceOrder: string[];
 }
 
-export type ChallengeKind = "constraint" | "weak_evidence" | "incoherent" | "better_alternative" | "unsupported_claim";
+export type StabilityOutcome = "preserved" | "tied" | "reversed" | "unavailable";
+
+/** One controlled check of whether the recorded recommendation changes when evidence changes. */
+export interface StabilityCheck {
+  id: string;
+  kind: "blind_order" | "anchor_dropout";
+  label: string;
+  omittedAnchor?: { id: string; name: string };
+  outcome: StabilityOutcome;
+  winnerCandidateId: string | null;
+  verdict: "winner" | "tie" | "insufficient_evidence" | "unavailable";
+  detail: string;
+}
+
+/**
+ * A decision audit, not a success probability. It records whether the same finalist survives
+ * order changes and leave-one-anchor-out Qloo re-tests.
+ */
+export interface StabilityAudit {
+  version: "stability:v1";
+  expectedWinnerId: string;
+  finalistIds: string[];
+  checks: StabilityCheck[];
+  completed: number;
+  preserved: number;
+  tied: number;
+  reversed: number;
+  unavailable: number;
+  /** The audit stopped because another Qloo check would have exceeded the run budget. */
+  budgetLimited: boolean;
+  /** True only when every completed check preserves the winner and every planned check completed. */
+  robust: boolean;
+}
+
+export type ChallengeKind =
+  "constraint" | "weak_evidence" | "incoherent" | "better_alternative" | "unsupported_claim";
 
 export interface ChallengeFinding {
   kind: ChallengeKind;
@@ -579,7 +623,14 @@ export interface HybridAttempt {
   kind: "union" | "swap" | "search" | "challenge";
   slot?: Slot;
   accepted: boolean;
-  rejectionCode?: RejectionCode | "duplicate" | "hard_failure" | "locked" | "brief_fit_lost" | "repeated_plan" | "generic_bundle";
+  rejectionCode?:
+    | RejectionCode
+    | "duplicate"
+    | "hard_failure"
+    | "locked"
+    | "brief_fit_lost"
+    | "repeated_plan"
+    | "generic_bundle";
   reason: string;
   retest?: {
     supportedBefore: number;
@@ -614,7 +665,16 @@ export interface PoolRecord {
   /** Rank in each Qloo view it appeared in. */
   views: Partial<Record<CandidateView, number>>;
   lanes: ("affinity" | "locality" | "brief_fit")[];
-  screens: { role: string; locality: string; /** Fit to a neighbourhood the brief names, when it names one. */ hood?: "near" | "outside" | "far" | "unknown"; brief: string; distinct: string; central: string; notes: string[] };
+  screens: {
+    role: string;
+    locality: string;
+    /** Fit to a neighbourhood the brief names, when it names one. */ hood?:
+      "near" | "outside" | "far" | "unknown";
+    brief: string;
+    distinct: string;
+    central: string;
+    notes: string[];
+  };
   /** "pool" (composed into bundles), "reserve" (kept for the challenge loop) or why it was dropped. */
   outcome: string;
   evidenceIds: string[];
@@ -627,7 +687,13 @@ export interface AgentRecord {
   pools: PoolRecord[];
   bundlesTested: number;
   rounds: ImprovementRound[];
-  stop: "no_weakness" | "no_improvement" | "no_alternative" | "repeated_plan" | "round_limit" | "budget";
+  stop:
+    | "no_weakness"
+    | "no_improvement"
+    | "no_alternative"
+    | "repeated_plan"
+    | "round_limit"
+    | "budget";
   /** screens:v4: what the agent's own screens say against the plan it kept. */
   selection?: import("./agent").SelectionFlags;
 }
@@ -646,7 +712,12 @@ export interface FinalVerdict {
   open: OpenSlot[];
   evaluation: PlanEvaluation | null;
   sources: Partial<Record<Slot, ComponentSource>>;
-  bestSupportedComponents: { slot: Slot; label: string; candidateId: string; status: ComponentStatus }[];
+  bestSupportedComponents: {
+    slot: Slot;
+    label: string;
+    candidateId: string;
+    status: ComponentStatus;
+  }[];
   userChoicesPreserved: { slot: Slot; label: string; locked: boolean; preserved: boolean }[];
   assumptionsIntroduced: string[];
   evidenceLimitations: string[];
@@ -675,6 +746,8 @@ export interface ParallelResult {
   initial: AdjudicationResult;
   rounds: ImprovementRound[];
   final: AdjudicationResult;
+  /** Finalist-only order and leave-one-anchor-out stress tests. Absent in older recordings. */
+  stability?: StabilityAudit;
   verdict: FinalVerdict;
   usage: Record<UsageScope, TrackUsage>;
   /** parallel:v3: the single evidence agent's pools, bundles and challenge rounds. */

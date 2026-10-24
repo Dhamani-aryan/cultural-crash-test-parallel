@@ -6,7 +6,15 @@ import { adjudicate } from "./adjudicate";
 import { evaluatePlan } from "./evaluate";
 import { gatherEvidence, type GatherContext } from "./gather";
 import { createHash } from "node:crypto";
-import { CHALLENGE_ROUNDS, BEAM_WIDTH, ROLE_SYSTEM, checkRemainingRoles, neighborhoodCentroid, planFingerprint, runEvidenceAgent } from "./agent";
+import {
+  CHALLENGE_ROUNDS,
+  BEAM_WIDTH,
+  ROLE_SYSTEM,
+  checkRemainingRoles,
+  neighborhoodCentroid,
+  planFingerprint,
+  runEvidenceAgent,
+} from "./agent";
 import { JUDGE_SYSTEM } from "./adjudicate";
 import { componentRank, optimize, rankBetter, type OptimizeResult } from "./hybrid";
 import { CONTRACT_VERSION, compileIntent, type IntentContract } from "./intent";
@@ -15,6 +23,7 @@ import { buildEvidenceMatrix, claimsOf, type MatrixContext } from "./matrix";
 import { QueryRequestSchema, parseQuery, type QueryRequest } from "./query";
 import type { RunDeps, RunOptions } from "./run";
 import { SCREENS_VERSION, type Centroid, type RoleCheck } from "./screens";
+import { auditRecommendationStability } from "./stability";
 import {
   ANCHOR_HYPOTHESIS_SYSTEM,
   CHOICE_COUNTRIES_SYSTEM,
@@ -49,7 +58,12 @@ import {
   type TrackUsage,
   type UsageScope,
 } from "./types";
-import { ADJUDICATION_VERSION, EVIDENCE_RUBRIC_VERSION, PARALLEL_VERSION, rankingFrom } from "./version";
+import {
+  ADJUDICATION_VERSION,
+  EVIDENCE_RUBRIC_VERSION,
+  PARALLEL_VERSION,
+  rankingFrom,
+} from "./version";
 
 /**
  * The parallel three-track controller.
@@ -61,7 +75,6 @@ import { ADJUDICATION_VERSION, EVIDENCE_RUBRIC_VERSION, PARALLEL_VERSION, rankin
  * counters and ledger scopes; neither receives the other's state. The final plan can be the
  * user's, the LLM's, the agent's or a hybrid; nothing here assumes the agent wins.
  */
-
 
 class Cancelled extends Error {}
 
@@ -128,7 +141,10 @@ export async function runParallelCrashTest(
 
   // ---- separate counters per track and stage ----
   const usage = Object.fromEntries(
-    (["shared", "user", "llm", "agent", "adjudication", "improvement"] as UsageScope[]).map((s) => [s, { ms: 0, qlooChecks: 0, llmCalls: 0 }]),
+    (["shared", "user", "llm", "agent", "adjudication", "improvement"] as UsageScope[]).map((s) => [
+      s,
+      { ms: 0, qlooChecks: 0, llmCalls: 0 },
+    ]),
   ) as Record<UsageScope, TrackUsage>;
   const llmFor = (scope: UsageScope): LlmClient => ({
     provider: deps.llm.provider,
@@ -142,7 +158,8 @@ export async function runParallelCrashTest(
   const statsAtStart = deps.qlooStats ? { ...deps.qlooStats } : undefined;
   const counted = budgeted(deps.qloo, state.maxQlooCalls, (used) => {
     state.qlooCallsUsed = used;
-    if (used % 10 === 0) emit({ type: "budget", qlooCallsUsed: used, maxQlooCalls: state.maxQlooCalls });
+    if (used % 10 === 0)
+      emit({ type: "budget", qlooCallsUsed: used, maxQlooCalls: state.maxQlooCalls });
   });
   const memo = memoized(counted.client);
   const clientFor = (scope: UsageScope): QlooClient => {
@@ -168,9 +185,22 @@ export async function runParallelCrashTest(
   );
   state.evidenceLedger = ledger.records;
   const ranking = rankingFrom(opts.ranking);
-  const ctxFor = (scope: UsageScope): GatherContext => ({ client: clientFor(scope), ledger: scopedLedger(ledger, scope), market, ranking });
-  const evaluateIn = (scope: UsageScope) => async (plan: CulturalPlan): Promise<PlanEvaluation> =>
-    evaluatePlan({ plan, evidence: await gatherEvidence(ctxFor(scope), plan), constraints: brief.constraints, city: market.label, iteration: state.currentIteration });
+  const ctxFor = (scope: UsageScope): GatherContext => ({
+    client: clientFor(scope),
+    ledger: scopedLedger(ledger, scope),
+    market,
+    ranking,
+  });
+  const evaluateIn =
+    (scope: UsageScope) =>
+    async (plan: CulturalPlan): Promise<PlanEvaluation> =>
+      evaluatePlan({
+        plan,
+        evidence: await gatherEvidence(ctxFor(scope), plan),
+        constraints: brief.constraints,
+        city: market.label,
+        iteration: state.currentIteration,
+      });
   const timed = async <T>(scope: UsageScope, fn: () => Promise<T>): Promise<T> => {
     const t = Date.now();
     try {
@@ -186,7 +216,9 @@ export async function runParallelCrashTest(
   const usedBlind = new Set<string>();
   const blindId = () => {
     for (let n = usedBlind.size; ; n++) {
-      const id = opts.blindId ? opts.blindId(n) : `P-${randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase()}`;
+      const id = opts.blindId
+        ? opts.blindId(n)
+        : `P-${randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase()}`;
       if (!usedBlind.has(id)) {
         usedBlind.add(id);
         return id;
@@ -200,7 +232,14 @@ export async function runParallelCrashTest(
     ms: Date.now() - started,
     generatedAt: new Date().toISOString(),
   });
-  const candidate = (track: PlanTrack, candidateId: string, t: TrackPlan, evaluation: PlanEvaluation | null, provenance: CandidatePlan["provenance"], parent?: string): CandidatePlan => ({
+  const candidate = (
+    track: PlanTrack,
+    candidateId: string,
+    t: TrackPlan,
+    evaluation: PlanEvaluation | null,
+    provenance: CandidatePlan["provenance"],
+    parent?: string,
+  ): CandidatePlan => ({
     candidateId,
     track,
     blindId: blindId(),
@@ -218,7 +257,13 @@ export async function runParallelCrashTest(
   // Full Qloo records for the logical rules, fetched once per entity.
   const facts = new Map<string, QlooEntity>();
   const ensureFacts = async (plans: CulturalPlan[]) => {
-    const ids = [...new Set(plans.flatMap((p) => p.components.flatMap((c) => (c.entity && !facts.has(c.entity.id) ? [c.entity.id] : []))))];
+    const ids = [
+      ...new Set(
+        plans.flatMap((p) =>
+          p.components.flatMap((c) => (c.entity && !facts.has(c.entity.id) ? [c.entity.id] : [])),
+        ),
+      ),
+    ];
     if (!ids.length) return;
     for (const e of await clientFor("shared").getEntities(ids)) facts.set(e.id, e);
   };
@@ -239,7 +284,12 @@ export async function runParallelCrashTest(
     neighborhood,
     resolutionEvidence: (id) =>
       ledger.records
-        .filter((r) => (r.queryKind === "search" || r.queryKind === "locality") && r.qlooEntityIds.includes(id) && !r.purpose.startsWith("The model judged"))
+        .filter(
+          (r) =>
+            (r.queryKind === "search" || r.queryKind === "locality") &&
+            r.qlooEntityIds.includes(id) &&
+            !r.purpose.startsWith("The model judged"),
+        )
         .map((r) => r.evidenceId),
   });
   const matrixOf = (cands: CandidatePlan[]) => buildEvidenceMatrix(cands, mctx());
@@ -248,14 +298,19 @@ export async function runParallelCrashTest(
   let contenders: CandidatePlan[] = [];
   let initial: AdjudicationResult | null = null;
   let final: AdjudicationResult | null = null;
+  let stability: ParallelResult["stability"];
   let improvement: OptimizeResult | null = null;
   const alternatives: CandidatePlan[] = [];
   let budgetHit = false;
 
   try {
     stage("validate", `Brief for ${market.label} checked and frozen (${frozen.fingerprint})`);
-    for (const c of brief.constraints.filter((c) => c.kind === "hard" && !c.lockSlot && !c.excludeNames?.length))
-      state.assumptions.push(`Hard constraint "${c.description}" isn't machine-checkable; it is shown to the model but not enforced in code.`);
+    for (const c of brief.constraints.filter(
+      (c) => c.kind === "hard" && !c.lockSlot && !c.excludeNames?.length,
+    ))
+      state.assumptions.push(
+        `Hard constraint "${c.description}" isn't machine-checkable; it is shown to the model but not enforced in code.`,
+      );
 
     stage("anchors", "Choosing the audience every plan will be measured against");
     const anchored = opts.anchors
@@ -266,32 +321,56 @@ export async function runParallelCrashTest(
             `Audience anchors frozen from ${opts.anchors.from}: ${opts.anchors.anchors.map((a) => a.name).join(", ")}${opts.anchors.source === "model_hypothesis" ? " (model-suggested there; a person should confirm them)" : ""}.`,
           ],
         }
-      : await timed("shared", () => measurementAnchors({ llm: llmFor("shared"), ctx: ctxFor("shared"), brief }));
+      : await timed("shared", () =>
+          measurementAnchors({ llm: llmFor("shared"), ctx: ctxFor("shared"), brief }),
+        );
     anchorSource = anchored.source;
     anchorNotes = anchored.notes;
     state.assumptions.push(...anchored.notes);
     if (!anchored.anchors.length) {
       state.stopReason = "insufficient_data";
-      state.stopDetail = "None of the audience anchors could be found in Qloo, so audience affinity can't be measured.";
+      state.stopDetail =
+        "None of the audience anchors could be found in Qloo, so audience affinity can't be measured.";
       throw new Cancelled();
     }
     const anchors = anchored.anchors;
 
     // The brief-intent contract and the named neighbourhood: shared inputs to every screen and explanation.
-    contract = compileIntent(brief, market, { names: anchors.map((a) => a.name), source: anchored.source });
-    neighborhood = contract.neighborhoods.length ? await timed("shared", () => neighborhoodCentroid(ctxFor("shared"), contract!).catch((err) => {
-      if (err instanceof BudgetExceeded) throw err;
-      return null;
-    })) : null;
+    contract = compileIntent(brief, market, {
+      names: anchors.map((a) => a.name),
+      source: anchored.source,
+    });
+    neighborhood = contract.neighborhoods.length
+      ? await timed("shared", () =>
+          neighborhoodCentroid(ctxFor("shared"), contract!).catch((err) => {
+            if (err instanceof BudgetExceeded) throw err;
+            return null;
+          }),
+        )
+      : null;
     // The user's named acts and brands get the same namesake protection as any name, once, shared.
-    const countries = await timed("shared", () => userChoiceCountries(llmFor("shared"), brief, market));
+    const countries = await timed("shared", () =>
+      userChoiceCountries(llmFor("shared"), brief, market),
+    );
 
-    stage("tracks", "Building three plans independently: yours as given, the LLM's alone, and the evidence agent's");
+    stage(
+      "tracks",
+      "Building three plans independently: yours as given, the LLM's alone, and the evidence agent's",
+    );
     const t0 = Date.now();
-    const userP = timed("user", () => buildUserTrack({ llm: llmFor("user"), ctx: ctxFor("user"), brief, anchors, countries }));
+    const userP = timed("user", () =>
+      buildUserTrack({ llm: llmFor("user"), ctx: ctxFor("user"), brief, anchors, countries }),
+    );
     const llmP = timed("llm", async () => {
       const draft = await generateLlmDraft(llmFor("llm"), frozen, market);
-      return resolveLlmTrack({ llm: llmFor("llm"), ctx: ctxFor("llm"), brief, draft, anchors, countries });
+      return resolveLlmTrack({
+        llm: llmFor("llm"),
+        ctx: ctxFor("llm"),
+        brief,
+        draft,
+        anchors,
+        countries,
+      });
     });
     // The single evidence agent: the frozen brief, the anchors, the contract and the locks. Not the
     // user's plan (an unlocked user choice is only a candidate), and never the LLM's.
@@ -318,20 +397,59 @@ export async function runParallelCrashTest(
         beamWidth,
       }),
     );
-    const [u, l, a] = await Promise.all([userP, llmP, agentP]);
+    // Do not let one failed track return the run while the other tracks are still emitting events
+    // and spending budget. Drain all three, then report the first failure as one coherent run.
+    const [userResult, llmResult, agentResult] = await Promise.allSettled([userP, llmP, agentP]);
+    const failed = [userResult, llmResult, agentResult].find(
+      (result) => result.status === "rejected",
+    );
+    if (failed?.status === "rejected") throw failed.reason;
+    if (
+      userResult.status !== "fulfilled" ||
+      llmResult.status !== "fulfilled" ||
+      agentResult.status !== "fulfilled"
+    )
+      throw new Error("A planning track did not finish.");
+    const u = userResult.value;
+    const l = llmResult.value;
+    const a = agentResult.value;
     agentRecord = a.record;
 
     stage("evaluate", "Testing all three plans with the same Qloo checks and the same screens");
-    const [ue, le] = await Promise.all([timed("user", () => evaluateIn("user")(u.plan)), timed("llm", () => evaluateIn("llm")(l.plan))]);
+    const [ue, le] = await Promise.all([
+      timed("user", () => evaluateIn("user")(u.plan)),
+      timed("llm", () => evaluateIn("llm")(l.plan)),
+    ]);
     await ensureFacts([u.plan, l.plan]);
     // Every plan gets the same structured role reading the agent's candidates got.
-    await timed("shared", () => checkRemainingRoles(llmFor("shared"), ctxFor("shared"), brief, contract!, [u.plan, l.plan], roleChecks, facts));
+    await timed("shared", () =>
+      checkRemainingRoles(
+        llmFor("shared"),
+        ctxFor("shared"),
+        brief,
+        contract!,
+        [u.plan, l.plan],
+        roleChecks,
+        facts,
+      ),
+    );
     const U = candidate("user", "user", u, ue, snapshot("user", t0));
     const L = candidate("llm", "llm", l, le, snapshot("llm", t0));
-    const A = candidate("agent", "agent", { plan: a.plan, open: a.open, sources: a.sources, assumptions: a.assumptions }, a.evaluation, snapshot("agent", t0));
+    const A = candidate(
+      "agent",
+      "agent",
+      { plan: a.plan, open: a.open, sources: a.sources, assumptions: a.assumptions },
+      a.evaluation,
+      snapshot("agent", t0),
+    );
     const chosen = planFingerprint(a.plan);
     for (const t of a.tested)
-      if (planFingerprint(t.plan) !== chosen) alternatives.push({ ...t, candidateId: `agent-alt-${alternatives.length + 1}`, parent: "agent" });
+      if (planFingerprint(t.plan) !== chosen)
+        alternatives.push({
+          ...t,
+          candidateId: `agent-alt-${alternatives.length + 1}`,
+          parent: "agent",
+        });
     state.trials!.push(...a.trials.map((t): CandidateTrial => ({ ...t, iteration: 0 })));
     candidates.push(U, L, A, ...alternatives);
     contenders = [U, L, A];
@@ -340,7 +458,15 @@ export async function runParallelCrashTest(
 
     stage("adjudicate", "Blind comparison of the three plans, in two orders");
     initial = await timed("adjudication", () =>
-      adjudicate({ llm: llmFor("adjudication"), stage: "initial", candidates: contenders, matrix: matrixOf(contenders), brief, market, ledger: scopedLedger(ledger, "adjudication") }),
+      adjudicate({
+        llm: llmFor("adjudication"),
+        stage: "initial",
+        candidates: contenders,
+        matrix: matrixOf(contenders),
+        brief,
+        market,
+        ledger: scopedLedger(ledger, "adjudication"),
+      }),
     );
 
     // The agent challenged its own plan already; across tracks, one bounded round of tested
@@ -364,11 +490,20 @@ export async function runParallelCrashTest(
     );
     if (improvement.stop === "budget") budgetHit = true;
     candidates.push(...improvement.hybrids);
-    if (improvement.incumbent.track === "hybrid") contenders = [...contenders, improvement.incumbent];
+    if (improvement.incumbent.track === "hybrid")
+      contenders = [...contenders, improvement.incumbent];
 
     stage("final", "Final blind comparison, in two orders");
     final = await timed("adjudication", () =>
-      adjudicate({ llm: llmFor("adjudication"), stage: "final", candidates: contenders, matrix: matrixOf(contenders), brief, market, ledger: scopedLedger(ledger, "adjudication") }),
+      adjudicate({
+        llm: llmFor("adjudication"),
+        stage: "final",
+        candidates: contenders,
+        matrix: matrixOf(contenders),
+        brief,
+        market,
+        ledger: scopedLedger(ledger, "adjudication"),
+      }),
     );
   } catch (err) {
     if (err instanceof BudgetExceeded) budgetHit = true;
@@ -418,14 +553,48 @@ export async function runParallelCrashTest(
       budgetHit = true;
     }
   }
-  const verdict = finalVerdict({ chosen, finalEval, fin, decidedBy, candidates, contenders, alternatives, improvement, matrix, anchorNotes, anchorSource });
+  if (chosen && !state.stopReason) {
+    stability =
+      (await timed("improvement", () =>
+        auditRecommendationStability(fin, candidates, {
+          evaluate: async (plan) => {
+            await ensureFacts([plan]);
+            return evaluateIn("improvement")(plan);
+          },
+          matrix: matrixOf,
+        }),
+      )) ?? undefined;
+    if (stability?.budgetLimited) budgetHit = true;
+  }
+  const verdict = finalVerdict({
+    chosen,
+    finalEval,
+    fin,
+    decidedBy,
+    candidates,
+    contenders,
+    alternatives,
+    improvement,
+    matrix,
+    anchorNotes,
+    anchorSource,
+    stability,
+  });
 
   state.plan = chosen?.plan ?? null;
-  state.evaluations = [contenders.find((c) => c.candidateId === "llm")?.evaluation, finalEval].filter((e): e is PlanEvaluation => !!e);
+  state.evaluations = [
+    contenders.find((c) => c.candidateId === "llm")?.evaluation,
+    finalEval,
+  ].filter((e): e is PlanEvaluation => !!e);
   state.unresolvedQuestions = verdict.humanChecks;
   state.currentIteration = agentRecord?.rounds.length ?? 0;
   if (!state.stopReason) {
-    const stop: StopReason = budgetHit || agentRecord?.stop === "budget" ? "api_budget_limit" : agentRecord?.stop === "round_limit" ? "iteration_limit" : "no_material_improvement";
+    const stop: StopReason =
+      budgetHit || agentRecord?.stop === "budget"
+        ? "api_budget_limit"
+        : agentRecord?.stop === "round_limit"
+          ? "iteration_limit"
+          : "no_material_improvement";
     state.stopReason = stop;
     state.stopDetail =
       stop === "api_budget_limit"
@@ -438,7 +607,12 @@ export async function runParallelCrashTest(
   state.qlooUsage = {
     checks: counted.used() + memo.reused(),
     reused: memo.reused(),
-    ...(deps.qlooStats && statsAtStart ? { cacheHits: deps.qlooStats.hits - statsAtStart.hits, requests: deps.qlooStats.requests - statsAtStart.requests } : {}),
+    ...(deps.qlooStats && statsAtStart
+      ? {
+          cacheHits: deps.qlooStats.hits - statsAtStart.hits,
+          requests: deps.qlooStats.requests - statsAtStart.requests,
+        }
+      : {}),
   };
   if (initial || candidates.length)
     state.parallel = {
@@ -454,6 +628,7 @@ export async function runParallelCrashTest(
       initial: initial ?? { ...empty, stage: "initial" },
       rounds: improvement?.rounds ?? [],
       final: fin,
+      stability,
       verdict,
       usage,
       agent: agentRecord,
@@ -466,7 +641,11 @@ export async function runParallelCrashTest(
         challengeRounds: maxRounds,
         maxQlooCalls: state.maxQlooCalls,
         promptsFingerprint: createHash("sha256")
-          .update([JUDGE_SYSTEM, ROLE_SYSTEM, ANCHOR_HYPOTHESIS_SYSTEM, CHOICE_COUNTRIES_SYSTEM].join("\n---\n"))
+          .update(
+            [JUDGE_SYSTEM, ROLE_SYSTEM, ANCHOR_HYPOTHESIS_SYSTEM, CHOICE_COUNTRIES_SYSTEM].join(
+              "\n---\n",
+            ),
+          )
           .digest("hex")
           .slice(0, 16),
         sampling: "provider default (no temperature or seed is set); outputs are not deterministic",
@@ -499,25 +678,51 @@ function finalVerdict(x: {
   matrix: ReturnType<typeof buildEvidenceMatrix>;
   anchorNotes: string[];
   anchorSource: ParallelResult["anchorSource"];
+  stability?: ParallelResult["stability"];
 }): FinalVerdict {
   const { chosen, fin, matrix } = x;
   const humanChecks: string[] = [];
   if (fin.verdict === "unstable")
-    humanChecks.push(`The blind judge's verdict changed with the order the plans were shown in. ${chosen ? `The plan shown leads on the recorded evidence, but a person should choose.` : "A person should choose."}`);
-  if (fin.verdict === "tie") humanChecks.push("The blind judge found the plans level on the evidence; a person should choose between them.");
-  if (fin.verdict === "insufficient_evidence") humanChecks.push(`No plan can be recommended: ${fin.rationale}`);
+    humanChecks.push(
+      `The blind judge's verdict changed with the order the plans were shown in. ${chosen ? `The plan shown leads on the recorded evidence, but a person should choose.` : "A person should choose."}`,
+    );
+  if (fin.verdict === "tie")
+    humanChecks.push(
+      "The blind judge found the plans level on the evidence; a person should choose between them.",
+    );
+  if (fin.verdict === "insufficient_evidence")
+    humanChecks.push(`No plan can be recommended: ${fin.rationale}`);
   if (x.anchorSource === "model_hypothesis") humanChecks.push(x.anchorNotes[0]);
+  if (x.stability?.reversed) {
+    const anchors = x.stability.checks
+      .filter((c) => c.outcome === "reversed" && c.omittedAnchor)
+      .map((c) => c.omittedAnchor!.name);
+    humanChecks.push(
+      `The recommended plan changed in ${x.stability.reversed} evidence stress test${x.stability.reversed === 1 ? "" : "s"}${anchors.length ? ` when ${anchors.join(", ")} ${anchors.length === 1 ? "was" : "were"} withheld` : ""}. Confirm that the audience definition reflects the launch.`,
+    );
+  }
   const states = chosen ? (matrix.componentStates[chosen.candidateId] ?? {}) : {};
   for (const slot of SLOTS) {
     const st = states[slot];
     const comp = chosen?.plan.components.find((c) => c.slot === slot);
     const open = chosen?.open.find((o) => o.slot === slot);
-    if (open) humanChecks.push(`${SLOT_LABEL[slot]}: ${open.state === "not_specified" ? "not specified" : "left open"}. ${open.reason}`);
+    if (open)
+      humanChecks.push(
+        `${SLOT_LABEL[slot]}: ${open.state === "not_specified" ? "not specified" : "left open"}. ${open.reason}`,
+      );
     else if (comp && st && st !== "supported")
-      humanChecks.push(`${SLOT_LABEL[slot]} "${comp.label}": ${COMPONENT_STATE_LABEL[st].toLowerCase()}. ${x.finalEval?.components.find((c) => c.slot === slot)?.finding ?? ""}`.trim());
-    if (comp && slot === "event_place") humanChecks.push(`Confirm that ${comp.label} can host the launch: capacity, dates and willingness are not in Qloo.`);
+      humanChecks.push(
+        `${SLOT_LABEL[slot]} "${comp.label}": ${COMPONENT_STATE_LABEL[st].toLowerCase()}. ${x.finalEval?.components.find((c) => c.slot === slot)?.finding ?? ""}`.trim(),
+      );
+    if (comp && slot === "event_place")
+      humanChecks.push(
+        `Confirm that ${comp.label} can host the launch: capacity, dates and willingness are not in Qloo.`,
+      );
   }
-  for (const c of chosen ? claimsOf(matrix, chosen.candidateId).filter((c) => c.ruleId === "R-unverifiable-rule") : []) humanChecks.push(`${c.claim} Please confirm it by hand.`);
+  for (const c of chosen
+    ? claimsOf(matrix, chosen.candidateId).filter((c) => c.ruleId === "R-unverifiable-rule")
+    : [])
+    humanChecks.push(`${c.claim} Please confirm it by hand.`);
 
   // The best-tested component per slot across every evaluated plan, wherever it came from.
   const best: FinalVerdict["bestSupportedComponents"] = [];
@@ -528,7 +733,8 @@ function finalVerdict(x: {
       if (!a) continue;
       if (!top || rankBetter(componentRank(a), componentRank(top.a))) top = { c, a };
     }
-    if (top) best.push({ slot, label: top.a.label, candidateId: top.c.candidateId, status: top.a.status });
+    if (top)
+      best.push({ slot, label: top.a.label, candidateId: top.c.candidateId, status: top.a.status });
   }
 
   const userChoices = x.contenders.find((c) => c.candidateId === "user");
@@ -542,26 +748,39 @@ function finalVerdict(x: {
         ? `Breaks the brief: ${fin.eliminated[c.candidateId].join("; ")}`
         : merged
           ? `Same choices as ${merged}.`
-          : c.plan.components.length < SLOTS.length && chosen && chosen.plan.components.length > c.plan.components.length
+          : c.plan.components.length < SLOTS.length &&
+              chosen &&
+              chosen.plan.components.length > c.plan.components.length
             ? "Leaves choices open."
             : fin.verdict === "winner"
               ? "The blind adjudication preferred another plan on the cited evidence."
               : "Ranked lower on the recorded evidence.",
     });
   }
-  for (const c of x.alternatives) rejected.push({ candidateId: c.candidateId, reason: "A complete plan the agent tested; the plan it kept ranked higher on the evidence order." });
-  for (const r of x.improvement?.rounds ?? []) for (const a of r.attempts) if (!a.accepted) rejected.push({ candidateId: a.candidateId, reason: a.reason });
+  for (const c of x.alternatives)
+    rejected.push({
+      candidateId: c.candidateId,
+      reason:
+        "A complete plan the agent tested; the plan it kept ranked higher on the evidence order.",
+    });
+  for (const r of x.improvement?.rounds ?? [])
+    for (const a of r.attempts)
+      if (!a.accepted) rejected.push({ candidateId: a.candidateId, reason: a.reason });
 
-  const limitations = new Set<string>(["Qloo affinity is cultural evidence. It does not show sales, attendance, availability, budget fit or causation."]);
-  if (chosen) for (const c of claimsOf(matrix, chosen.candidateId)) for (const l of c.limitations) limitations.add(l);
+  const limitations = new Set<string>([
+    "Qloo affinity is cultural evidence. It does not show sales, attendance, availability, budget fit or causation.",
+  ]);
+  if (chosen)
+    for (const c of claimsOf(matrix, chosen.candidateId))
+      for (const l of c.limitations) limitations.add(l);
 
   return {
     candidateId: chosen?.candidateId ?? null,
     track: chosen?.track ?? null,
     verdict: fin.verdict,
-    stable: fin.verdict === "winner" && x.decidedBy === "adjudication",
+    stable: fin.verdict === "winner" && x.decidedBy === "adjudication" && !x.stability?.reversed,
     decidedBy: x.decidedBy,
-    provisional: !!chosen && x.decidedBy === "evidence_order",
+    provisional: !!chosen && (x.decidedBy === "evidence_order" || !!x.stability?.reversed),
     plan: chosen?.plan ?? null,
     open: chosen?.open ?? [],
     evaluation: x.finalEval,
@@ -569,14 +788,21 @@ function finalVerdict(x: {
     bestSupportedComponents: best,
     userChoicesPreserved: (userChoices?.plan.components ?? []).map((u) => {
       const f = chosen?.plan.components.find((c) => c.slot === u.slot);
-      return { slot: u.slot, label: u.label, locked: u.locked, preserved: !!f && f.origin === "user_provided" && f.label === u.label };
+      return {
+        slot: u.slot,
+        label: u.label,
+        locked: u.locked,
+        preserved: !!f && f.origin === "user_provided" && f.label === u.label,
+      };
     }),
     // A plan inherits the assumptions of every track it takes a component from.
     assumptionsIntroduced: [
       ...new Set([
         ...(x.anchorSource === "model_hypothesis" ? x.anchorNotes.slice(0, 1) : []),
         ...(chosen?.assumptions ?? []),
-        ...[...new Set(Object.values(chosen?.sources ?? {}))].flatMap((s) => x.contenders.find((c) => c.track === s)?.assumptions ?? []),
+        ...[...new Set(Object.values(chosen?.sources ?? {}))].flatMap(
+          (s) => x.contenders.find((c) => c.track === s)?.assumptions ?? [],
+        ),
       ]),
     ],
     evidenceLimitations: [...limitations],
@@ -587,5 +813,10 @@ function finalVerdict(x: {
 
 /** Which candidates a merged winner stands for: itself and any identical plan. */
 export function mergedWith(r: AdjudicationResult, id: string): string[] {
-  return [id, ...Object.entries(r.merged).filter(([, k]) => k === id).map(([d]) => d)];
+  return [
+    id,
+    ...Object.entries(r.merged)
+      .filter(([, k]) => k === id)
+      .map(([d]) => d),
+  ];
 }
