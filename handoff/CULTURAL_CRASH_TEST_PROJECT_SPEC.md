@@ -1,5 +1,7 @@
 # Cultural Crash-Test Agent
 
+> **HACKATHON JUDGING AND RULES REFERENCE:** This is the repository file that records the Qloo Agentic Hackathon challenge context, equally weighted judging criteria, submission requirements, product requirements, and acceptance criteria. See **Section 2 — Hackathon fit and submission constraints** and **Section 13 — Acceptance criteria**. Give this file to an independent reviewer together with `handoff/INDEPENDENT_JUDGE_PROJECT_AND_CODEBASE_BRIEF.md`.
+
 ## Project specification, product requirements, technical plan, and coding-agent brief
 
 > **Working tagline:** Find the cultural mismatch before launch. Then fix it.
