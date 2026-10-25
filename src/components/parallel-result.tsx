@@ -20,6 +20,27 @@ import type { OperationalAudit } from "@/lib/operational/types";
 
 const eyebrow = "font-mono text-[10px] uppercase tracking-[0.11em] text-muted";
 
+const SOURCE_TONE: Record<string, string> = {
+  "Qloo evidence": "border-accent/25 bg-accent/10 text-accent",
+  "Qloo entity data": "border-accent/25 bg-accent/10 text-accent",
+  "User constraint": "border-ink/15 bg-panel-2 text-ink-2",
+  "Your brief": "border-ink/15 bg-panel-2 text-ink-2",
+  "Official venue source": "border-supported/25 bg-supported/10 text-supported",
+  "Human check": "border-weak/30 bg-weak/10 text-weak",
+  "Stress test": "border-weak/30 bg-weak/10 text-weak",
+  "Application rule": "border-ink/15 bg-panel-2 text-ink-2",
+};
+
+function SourceBadge({ source }: { source: string }) {
+  return (
+    <span
+      className={`mr-1.5 inline-flex rounded border px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] ${SOURCE_TONE[source] ?? SOURCE_TONE["Application rule"]}`}
+    >
+      {source}
+    </span>
+  );
+}
+
 /** Unknown and unverified are grey, never the failure colour: missing evidence isn't a failure. */
 const STATE_TONE: Record<CellView["state"], string> = {
   supported: "text-supported",
@@ -63,11 +84,16 @@ function ClaimList({ title, claims, tone }: { title: string; claims: ClaimView[]
       <ul className="mt-1 space-y-2">
         {claims.map((c) => (
           <li key={c.claimId} className="text-[13px] leading-5 text-ink-2">
+            <SourceBadge source={c.source} />
+            {c.decisive && (
+              <span className="mr-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-ink">
+                Decisive
+              </span>
+            )}
             {c.text}
             {c.limitations.length > 0 && (
               <span className="text-muted"> ({c.limitations.join(" ")})</span>
             )}
-            <span className="text-muted"> Source: {c.source}.</span>
           </li>
         ))}
       </ul>
@@ -78,7 +104,8 @@ function ClaimList({ title, claims, tone }: { title: string; claims: ClaimView[]
 function plainSupportReason(r: RowView): string | null {
   const support = r.support.find((claim) => claim.decisive) ?? r.support[0];
   if (!support) return null;
-  if (support.source !== "Qloo" && support.source !== "Qloo entity data") return support.text;
+  if (support.source !== "Qloo evidence" && support.source !== "Qloo entity data")
+    return support.text;
   const fit: Record<Slot, string> = {
     artist_music: "music choice",
     brand_collaboration: "collaboration partner",
@@ -86,6 +113,69 @@ function plainSupportReason(r: RowView): string | null {
     creative_direction: "creative direction",
   };
   return `${r.final.label} was the strongest ${fit[r.slot]} match found for the intended audience and the rest of the plan.`;
+}
+
+function EvidenceDelta({ rows, operational }: { rows: RowView[]; operational?: OperationalAudit }) {
+  const changed = rows.filter(
+    (row) =>
+      row.you.candidateId &&
+      row.you.state !== "not_specified" &&
+      row.you.state !== "abstained" &&
+      row.you.label !== row.final.label,
+  );
+  const qlooChanged = changed.filter((row) =>
+    row.support.some(
+      (claim) =>
+        claim.decisive && (claim.source === "Qloo evidence" || claim.source === "Qloo entity data"),
+    ),
+  );
+  return (
+    <section
+      aria-labelledby="qloo-delta"
+      className="rounded-xl border border-accent/20 bg-accent/[0.04] px-5 py-5"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <p id="qloo-delta" className={eyebrow}>
+          What changed because of Qloo?
+        </p>
+        <SourceBadge source="Qloo evidence" />
+      </div>
+      {qlooChanged.length ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {qlooChanged.map((row) => (
+            <article key={row.slot} className="rounded-lg border border-line bg-panel px-4 py-4">
+              <p className="text-xs font-bold uppercase tracking-[0.06em] text-ink">{row.title}</p>
+              <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.08em] text-muted">Original</p>
+                  <p className="mt-1 text-sm font-medium text-ink-2">{row.you.label}</p>
+                </div>
+                <span aria-hidden className="text-lg text-accent">
+                  →
+                </span>
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.08em] text-muted">Recommended</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">{row.final.label}</p>
+                </div>
+              </div>
+              <p className="mt-3 text-xs leading-5 text-ink-2">{plainSupportReason(row)}</p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-ink-2">
+          Qloo did not justify replacing one of your stated choices. The final plan kept the choices
+          that remained competitive after the complete plans were tested.
+        </p>
+      )}
+      {operational?.override && (
+        <p className="mt-3 text-xs leading-5 text-muted">
+          The venue changed for a separate reason: an official-source operational conflict, not a
+          Qloo cultural score.
+        </p>
+      )}
+    </section>
+  );
 }
 
 function operationalConflict(reason: string): string {
@@ -210,7 +300,10 @@ function DecisionOverview({ state, rows }: { state: RunState; rows: RowView[] })
   const finalVenue = rows.find((row) => row.slot === "event_place")?.final.label;
   const venueCheck = p.operational?.checks.find((check) => check.venue === finalVenue);
   return (
-    <section aria-labelledby="decision-summary" className="rounded-xl border border-line bg-panel px-5 py-5 shadow-sm">
+    <section
+      aria-labelledby="decision-summary"
+      className="rounded-xl border border-line bg-panel px-5 py-5 shadow-sm"
+    >
       <p className={eyebrow}>Recommendation in plain language</p>
       <h3 id="decision-summary" className="mt-1 text-lg font-semibold tracking-[-0.02em] text-ink">
         Why this is the final plan
@@ -230,27 +323,43 @@ function DecisionOverview({ state, rows }: { state: RunState; rows: RowView[] })
         })}
         {override && (
           <p>
-            Qloo&apos;s cultural comparison initially preferred {override.fromVenue}. The live official-source check found that {operationalConflict(override.reason)}. The web check did not create a new recommendation or rewrite the cultural scores; it ruled out that finalist, so the final plan {override.toVenue ? `uses the highest-ranked remaining option, ${override.toVenue}` : "leaves the venue unresolved"}.
+            Qloo&apos;s cultural comparison initially preferred {override.fromVenue}. The live
+            official-source check found that {operationalConflict(override.reason)}. The web check
+            did not create a new recommendation or rewrite the cultural scores; it ruled out that
+            finalist, so the final plan{" "}
+            {override.toVenue
+              ? `uses the highest-ranked remaining option, ${override.toVenue}`
+              : "leaves the venue unresolved"}
+            .
           </p>
         )}
         {!override && venueCheck?.status === "verified_fit" && (
           <p>
-            The live web check also confirmed that {venueCheck.venue} is operationally plausible for the proposed event. Booking terms, availability and final production requirements still need direct confirmation.
+            The live web check also confirmed that {venueCheck.venue} is operationally plausible for
+            the proposed event. Booking terms, availability and final production requirements still
+            need direct confirmation.
           </p>
         )}
         {!override && venueCheck?.status === "unverified" && (
           <p>
-            The cultural case for {venueCheck.venue} was strongest, but the live web check could not confirm enough current operational information. Treat the venue recommendation as provisional until capacity, event format and product-demonstration conditions are confirmed directly.
+            The cultural case for {venueCheck.venue} was strongest, but the live web check could not
+            confirm enough current operational information. Treat the venue recommendation as
+            provisional until capacity, event format and product-demonstration conditions are
+            confirmed directly.
           </p>
         )}
         {!override && venueCheck?.status === "verified_conflict" && (
           <p>
-            The live web check found an operational conflict for {venueCheck.venue}. The venue should not be treated as approved until that conflict is resolved by a person.
+            The live web check found an operational conflict for {venueCheck.venue}. The venue
+            should not be treated as approved until that conflict is resolved by a person.
           </p>
         )}
         {p.agent && (
           <p>
-            The three columns below are the finalists, not the whole search. The evidence agent screened {screened} candidate choices across the four decision areas and tested {bundles} complete plan combination{bundles === 1 ? "" : "s"}. The strongest agent plan was then compared with your plan and the independent LLM plan.
+            The three columns below are the finalists, not the whole search. The evidence agent
+            screened {screened} candidate choices across the four decision areas and tested{" "}
+            {bundles} complete plan combination{bundles === 1 ? "" : "s"}. The strongest agent plan
+            was then compared with your plan and the independent LLM plan.
           </p>
         )}
       </div>
@@ -360,7 +469,11 @@ function JudgeReceipt({ state, rows }: { state: RunState; rows: RowView[] }) {
     (row) => row.llm.candidateId && row.llm.label !== row.final.label,
   ).length;
   const qlooSupport = rows.reduce(
-    (count, row) => count + row.support.filter((claim) => claim.source === "Qloo").length,
+    (count, row) =>
+      count +
+      row.support.filter(
+        (claim) => claim.source === "Qloo evidence" || claim.source === "Qloo entity data",
+      ).length,
     0,
   );
   const facts = [
@@ -446,6 +559,8 @@ export function ParallelRunResult({ state }: { state: RunState }) {
       </header>
 
       <DecisionOverview state={state} rows={view.rows} />
+
+      <EvidenceDelta rows={view.rows} operational={p.operational} />
 
       <section aria-labelledby="parallel-comparison">
         <div className="mb-4">

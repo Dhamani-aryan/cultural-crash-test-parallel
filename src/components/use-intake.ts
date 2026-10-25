@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { Chip, IntakeBrief, IntakeReply, IntakeRequest, IntakeState } from "@/lib/intake/types";
+import type {
+  Chip,
+  IntakeBrief,
+  IntakeReply,
+  IntakeRequest,
+  IntakeState,
+} from "@/lib/intake/types";
+import { apiErrorMessage } from "./error-copy";
 
 /** The intake conversation, held in the browser; the server re-validates it on every turn. */
 export function useIntake() {
@@ -17,12 +24,15 @@ export function useIntake() {
         const res = await fetch("/api/intake", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...req, state: req.action === "reset" ? undefined : (state ?? undefined) }),
+          body: JSON.stringify({
+            ...req,
+            state: req.action === "reset" ? undefined : (state ?? undefined),
+          }),
         });
         const body = await res.json().catch(() => null);
         if (!res.ok) {
           const detail = Array.isArray(body?.detail) ? body.detail.join("; ") : body?.detail;
-          throw new Error(res.status === 429 ? "Too many messages for now. Wait a few minutes." : (detail ?? body?.error ?? `Request failed (${res.status})`));
+          throw new Error(apiErrorMessage(body?.error, res.status, detail, "intake"));
         }
         setState(body.state);
         return body as IntakeReply;
@@ -36,12 +46,22 @@ export function useIntake() {
     [state],
   );
 
-  const send = useCallback((message: string, marketId?: string) => call({ action: "message", message, marketId }), [call]);
-  const edit = useCallback((patch: Partial<IntakeBrief>) => call({ action: "update_brief", patch }), [call]);
+  const send = useCallback(
+    (message: string, marketId?: string) => call({ action: "message", message, marketId }),
+    [call],
+  );
+  const edit = useCallback(
+    (patch: Partial<IntakeBrief>) => call({ action: "update_brief", patch }),
+    [call],
+  );
   const chip = useCallback(
     (c: Chip, marketId?: string) =>
       c.action
-        ? call({ action: c.action, hypothesisId: c.hypothesisId, patch: c.patch as Partial<IntakeBrief> | undefined })
+        ? call({
+            action: c.action,
+            hypothesisId: c.hypothesisId,
+            patch: c.patch as Partial<IntakeBrief> | undefined,
+          })
         : call({ action: "message", message: c.send ?? c.label, marketId }),
     [call],
   );

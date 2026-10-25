@@ -140,15 +140,22 @@ const claimView = (c: EvidenceClaim, decisive: Set<string>): ClaimView => ({
   claimId: c.claimId,
   dimension: EVIDENCE_DIMENSION_LABEL[c.dimension],
   text: c.claim,
-  source: c.source.startsWith("qloo")
-    ? "Qloo"
-    : c.source === "logical_rubric"
-      ? "Rule"
-      : c.source === "user"
-        ? "Your brief"
-        : c.source === "constraint"
-          ? "Constraint"
-          : "Qloo entity data",
+  source:
+    c.source === "entity_metadata"
+      ? "Qloo entity data"
+      : c.source.startsWith("qloo")
+        ? "Qloo evidence"
+        : c.source === "logical_rubric"
+          ? "Application rule"
+          : c.source === "user"
+            ? "Your brief"
+            : c.source === "constraint"
+              ? "User constraint"
+              : c.source === "official_source"
+                ? "Official venue source"
+                : c.source === "human"
+                  ? "Human check"
+                  : "Stress test",
   decisive: decisive.has(c.claimId),
   limitations: c.limitations,
   evidenceIds: c.evidenceIds,
@@ -271,18 +278,18 @@ export function parallelView(state: RunState): ParallelView | null {
       : semanticContradictions.length
         ? `Provisional: the leading plan still has ${semanticContradictions.length} explicit brief contradiction${semanticContradictions.length === 1 ? "" : "s"}. A person must accept that trade-off or revise the plan.`
         : audit?.reversed
-      ? `Provisional: ${audit.reversed} evidence stress test${audit.reversed === 1 ? "" : "s"} selected a different finalist; a person should review it before relying on it.`
-      : v.stable && audit?.robust
-        ? `Stable: all ${audit.completed} recorded stability checks preserved the recommendation.`
-        : v.stable && audit
-          ? `Stable blind verdict; ${audit.preserved} of ${audit.completed} completed stress tests preserved it${audit.tied ? ` and ${audit.tied} produced a tie` : ""}.`
-          : v.stable
-            ? "Stable: the same verdict in both blind orders."
-            : v.verdict === "unstable"
-              ? `Unstable: the blind verdict changed with the order the plans were shown in.${provisional ? " This plan only leads on the evidence order; a person should review it before relying on it." : ""}`
-              : v.verdict === "tie"
-                ? `Tie: the blind judge found the plans level.${provisional ? " This plan only leads on the evidence order; a person should choose." : ""}`
-                : "No verdict: not enough evidence.",
+          ? `Provisional: ${audit.reversed} evidence stress test${audit.reversed === 1 ? "" : "s"} selected a different finalist; a person should review it before relying on it.`
+          : v.stable && audit?.robust
+            ? `Stable: all ${audit.completed} recorded stability checks preserved the recommendation.`
+            : v.stable && audit
+              ? `Stable blind verdict; ${audit.preserved} of ${audit.completed} completed stress tests preserved it${audit.tied ? ` and ${audit.tied} produced a tie` : ""}.`
+              : v.stable
+                ? "Stable: the same verdict in both blind orders."
+                : v.verdict === "unstable"
+                  ? `Unstable: the blind verdict changed with the order the plans were shown in.${provisional ? " This plan only leads on the evidence order; a person should review it before relying on it." : ""}`
+                  : v.verdict === "tie"
+                    ? `Tie: the blind judge found the plans level.${provisional ? " This plan only leads on the evidence order; a person should choose." : ""}`
+                    : "No verdict: not enough evidence.",
     // A clarification left open (a delegated conflict, an unresolved identity) names the one check that could change the plan.
     ...(state.clarification?.provisional.length && F
       ? { stability: `Provisional: ${state.clarification.provisional[0]}` }
@@ -468,7 +475,9 @@ export function toParallelMarkdown(state: RunState): string {
             : []),
           ...p.operational.checks.flatMap((check) => [
             `- **${check.venue} — ${check.status.replaceAll("_", " ")}:** ${check.finding}`,
-            ...check.sources.map((source) => `  - [${source.title}](${source.url}) (${source.sourceType})`),
+            ...check.sources.map(
+              (source) => `  - [${source.title}](${source.url}) (${source.sourceType})`,
+            ),
           ]),
         ]
       : []),

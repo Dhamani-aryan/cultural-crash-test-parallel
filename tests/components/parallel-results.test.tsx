@@ -69,13 +69,17 @@ describe("parallel results", () => {
   it("explains that an operational override rejects a finalist rather than inventing a web recommendation", async () => {
     const state = await parallel();
     const candidates = state.parallel!.candidates;
-    const from = candidates.find((candidate) => candidate.candidateId === state.parallel!.verdict.candidateId)!;
+    const from = candidates.find(
+      (candidate) => candidate.candidateId === state.parallel!.verdict.candidateId,
+    )!;
     const to = candidates.find(
       (candidate) =>
         candidate.candidateId !== from.candidateId &&
         candidate.plan.components.some((component) => component.slot === "event_place"),
     )!;
-    const fromVenue = from.plan.components.find((component) => component.slot === "event_place")!.label;
+    const fromVenue = from.plan.components.find(
+      (component) => component.slot === "event_place",
+    )!.label;
     const toVenue = to.plan.components.find((component) => component.slot === "event_place")!.label;
     state.parallel!.operational = {
       version: "operational:v1",
@@ -122,6 +126,8 @@ describe("parallel results", () => {
     expect(html).toContain("View details");
     expect(html).toContain("Plan comparison");
     expect(html).toContain("Recommendation in plain language");
+    expect(html).toContain("What changed because of Qloo?");
+    expect(html).toContain("Qloo evidence");
     expect(html).toContain("The three columns below are the finalists, not the whole search");
     expect(html).toContain("candidate choices across the four decision areas");
     expect(html).toContain("complete plan combination");
@@ -132,21 +138,47 @@ describe("parallel results", () => {
     expect(html).not.toMatch(/predicted sales|guaranteed|will sell/i);
   });
 
+  it("labels official-source evidence separately from Qloo evidence", async () => {
+    const state = await parallel();
+    const winner = state.parallel!.verdict.candidateId!;
+    state.parallel!.matrix.claims.push({
+      claimId: `${winner}/event_place/official-test`,
+      candidateId: winner,
+      slot: "event_place",
+      dimension: "feasibility",
+      stance: "supports",
+      source: "official_source",
+      claim: "The official venue page confirms the required event format.",
+      evidenceIds: [],
+      ruleId: "R-official-test",
+      strength: "strong",
+      limitations: [],
+    });
+    const venue = parallelView(state)!.rows.find((row) => row.slot === "event_place")!;
+    expect(venue.support.find((claim) => claim.claimId.endsWith("official-test"))?.source).toBe(
+      "Official venue source",
+    );
+    const html = renderToStaticMarkup(<RunResult state={state} />);
+    expect(html).toContain("Official venue source");
+  });
+
   it("surfaces an unresolved live venue check in marketer language", async () => {
     const state = await parallel();
     const venue = parallelView(state)!.rows.find((row) => row.slot === "event_place")!.final.label;
     state.parallel!.operational = {
       version: "operational:v1",
       checkedAt: "2026-10-25T00:00:00.000Z",
-      checks: [{
-        venue,
-        city: "London",
-        status: "unverified",
-        finding: "Not enough current information.",
-        facts: [],
-        limitations: [],
-        sources: [],
-      }],
+      checks: [
+        {
+          venue,
+          city: "London",
+          status: "unverified",
+          finding: "Not enough current information.",
+          facts: [],
+          limitations: [],
+          sources: [],
+        },
+      ],
     };
     const html = renderToStaticMarkup(<RunResult state={state} />);
     expect(html).toContain(`The cultural case for ${venue} was strongest`);

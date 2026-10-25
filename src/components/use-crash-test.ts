@@ -2,7 +2,14 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { AnswerInput, ClarifyEvent } from "@/lib/clarify/session";
-import { emptyClarify, isClarifyEvent, recoveryFor, reduceClarify, type ClarifyItem, type ClarifyView } from "./clarify-view";
+import {
+  emptyClarify,
+  isClarifyEvent,
+  recoveryFor,
+  reduceClarify,
+  type ClarifyItem,
+  type ClarifyView,
+} from "./clarify-view";
 import type { IntakeState } from "@/lib/intake/types";
 import type {
   CulturalPlan,
@@ -12,6 +19,7 @@ import type {
   RunEvent,
   RunState,
 } from "@/lib/crashtest/types";
+import { apiErrorMessage } from "./error-copy";
 
 /** One line of the agent console, in the order things happened. */
 export type LogEntry =
@@ -54,7 +62,16 @@ type StreamEvent = RunEvent | ClarifyEvent;
 export function reduceStream(v: View, e: StreamEvent): View {
   if (!isClarifyEvent(e)) return reduce(v, e);
   const clarify = reduceClarify(v.clarify, e);
-  return { ...v, clarify, phase: e.type === "clarification_required" ? "awaiting" : e.type === "run_started" || e.type === "ready" ? "running" : v.phase };
+  return {
+    ...v,
+    clarify,
+    phase:
+      e.type === "clarification_required"
+        ? "awaiting"
+        : e.type === "run_started" || e.type === "ready"
+          ? "running"
+          : v.phase,
+  };
 }
 
 type RunInput = LaunchBriefInput | { intake: IntakeState; depth: "quick" | "thorough" };
@@ -67,11 +84,19 @@ export function reduce(v: View, e: RunEvent): View {
     case "evidence":
       return { ...v, evidence: [...v.evidence, e.record] };
     case "plan":
-      return e.label === "initial" ? { ...v, initialPlan: e.plan, plan: e.plan } : { ...v, plan: e.plan };
+      return e.label === "initial"
+        ? { ...v, initialPlan: e.plan, plan: e.plan }
+        : { ...v, plan: e.plan };
     case "evaluation":
       return { ...v, log: [...v.log, { kind: "evaluation", evaluation: e.evaluation }] };
     case "action":
-      return { ...v, log: [...v.log, { kind: "action", iteration: e.action.iteration, slot: e.action.slot, why: e.action.why }] };
+      return {
+        ...v,
+        log: [
+          ...v.log,
+          { kind: "action", iteration: e.action.iteration, slot: e.action.slot, why: e.action.why },
+        ],
+      };
     case "change":
       return { ...v, log: [...v.log, { kind: "change", change: e.change }] };
     case "budget":
@@ -86,7 +111,20 @@ export function reduce(v: View, e: RunEvent): View {
         budget: { used: e.state.qlooCallsUsed, max: e.state.maxQlooCalls },
       };
     case "error":
-      return { ...v, phase: "error", error: e.message };
+      return {
+        ...v,
+        phase: "error",
+        error: apiErrorMessage(
+          /qloo/i.test(e.message)
+            ? "qloo_error"
+            : /(?:model|llm)/i.test(e.message)
+              ? "llm_error"
+              : "stream_error",
+          500,
+          e.message,
+          "run",
+        ),
+      };
     default:
       // Clarification events (P1) are rendered by the chat interface (P2); the run view ignores them.
       return v;
@@ -128,84 +166,131 @@ export function useCrashTest() {
   }, []);
 
   /** Read one response's events into the view, starting from `from`. */
-  const consume = useCallback(async (res: Response, from: View) => {
-    let current = from;
-    for await (const event of readSse(res.body!)) {
-      current = reduceStream(current, event);
-      show(current);
-    }
-    // A stream that pauses on a question is waiting for the user, not broken.
-    if (current.phase === "running") show({ ...current, phase: "error", error: "The connection closed before the run finished." });
-  }, [show]);
-
-  const fail = useCallback((controller: AbortController, err: unknown) => {
-    const v = latest.current;
-    if (controller.signal.aborted) {
-      show({ ...v, phase: v.result ? "done" : "error", error: v.result ? null : "Cancelled.", clarify: { ...v.clarify, sending: false, active: null } });
-      return;
-    }
-    show({ ...v, phase: "error", error: err instanceof Error ? err.message : String(err), clarify: { ...v.clarify, sending: false } });
-  }, [show]);
-
-  const run = useCallback(async (input: RunInput, fresh = false) => {
-    abort.current?.abort();
-    const controller = new AbortController();
-    abort.current = controller;
-    lastInput.current = { input, fresh };
-    show({ ...initial, phase: "running" });
-    try {
-      const res = await fetch("/api/crashtest", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        // Every run goes through the clarification gate; a clear brief continues straight into the run.
-        body: JSON.stringify("intake" in input ? { ...input, fresh, clarify: true } : { brief: input, fresh, clarify: true }),
-        signal: controller.signal,
-      });
-      if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => null);
-        const detail = Array.isArray(body?.detail) ? body.detail.join("; ") : body?.detail;
-        throw new Error(
-          res.status === 429
-            ? "Live runs are rate-limited on this demo. Try an example brief (recorded runs are free) or wait a few minutes."
-            : (detail ?? body?.error ?? `Request failed (${res.status})`),
-        );
+  const consume = useCallback(
+    async (res: Response, from: View) => {
+      let current = from;
+      for await (const event of readSse(res.body!)) {
+        current = reduceStream(current, event);
+        show(current);
       }
-      await consume(res, latest.current);
-    } catch (err) {
-      fail(controller, err);
-    }
-  }, [consume, fail, show]);
+      // A stream that pauses on a question is waiting for the user, not broken.
+      if (current.phase === "running")
+        show({
+          ...current,
+          phase: "error",
+          error: "The connection closed before the run finished.",
+        });
+    },
+    [show],
+  );
+
+  const fail = useCallback(
+    (controller: AbortController, err: unknown) => {
+      const v = latest.current;
+      if (controller.signal.aborted) {
+        show({
+          ...v,
+          phase: v.result ? "done" : "error",
+          error: v.result ? null : "Cancelled.",
+          clarify: { ...v.clarify, sending: false, active: null },
+        });
+        return;
+      }
+      show({
+        ...v,
+        phase: "error",
+        error: err instanceof Error ? err.message : String(err),
+        clarify: { ...v.clarify, sending: false },
+      });
+    },
+    [show],
+  );
+
+  const run = useCallback(
+    async (input: RunInput, fresh = false) => {
+      abort.current?.abort();
+      const controller = new AbortController();
+      abort.current = controller;
+      lastInput.current = { input, fresh };
+      show({ ...initial, phase: "running" });
+      try {
+        const res = await fetch("/api/crashtest", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          // Every run goes through the clarification gate; a clear brief continues straight into the run.
+          body: JSON.stringify(
+            "intake" in input
+              ? { ...input, fresh, clarify: true }
+              : { brief: input, fresh, clarify: true },
+          ),
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) {
+          const body = await res.json().catch(() => null);
+          const detail = Array.isArray(body?.detail) ? body.detail.join("; ") : body?.detail;
+          throw new Error(apiErrorMessage(body?.error, res.status, detail, "run"));
+        }
+        await consume(res, latest.current);
+      } catch (err) {
+        fail(controller, err);
+      }
+    },
+    [consume, fail, show],
+  );
 
   /**
    * Answer the open question(s). The user's words appear at once as their message; the card and
    * composer are disabled until the server replies, so an answer can't be sent twice.
    */
-  const answer = useCallback(async (answers: AnswerInput[], receipt: string) => {
-    const v = latest.current;
-    if (v.phase !== "awaiting" || v.clarify.sending || !v.clarify.sessionId) return;
-    const controller = new AbortController();
-    abort.current = controller;
-    const userItem: ClarifyItem = { kind: "user", id: `u${Date.now()}`, text: receipt };
-    const sending: View = { ...v, error: null, clarify: { ...v.clarify, sending: true, recovery: null, items: [...v.clarify.items, userItem] } };
-    show(sending);
-    try {
-      const res = await fetch("/api/crashtest", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clarification: { sessionId: v.clarify.sessionId, answers }, fresh: lastInput.current?.fresh ?? false }),
-        signal: controller.signal,
-      });
-      if (!res.ok || !res.body) {
-        // Keep the conversation; take back the unsent answer and offer the one action that helps.
-        const recovery = recoveryFor(res.status);
-        show({ ...v, clarify: { ...v.clarify, sending: false, recovery, active: recovery.action === "retry" ? v.clarify.active : null } });
-        return;
+  const answer = useCallback(
+    async (answers: AnswerInput[], receipt: string) => {
+      const v = latest.current;
+      if (v.phase !== "awaiting" || v.clarify.sending || !v.clarify.sessionId) return;
+      const controller = new AbortController();
+      abort.current = controller;
+      const userItem: ClarifyItem = { kind: "user", id: `u${Date.now()}`, text: receipt };
+      const sending: View = {
+        ...v,
+        error: null,
+        clarify: {
+          ...v.clarify,
+          sending: true,
+          recovery: null,
+          items: [...v.clarify.items, userItem],
+        },
+      };
+      show(sending);
+      try {
+        const res = await fetch("/api/crashtest", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            clarification: { sessionId: v.clarify.sessionId, answers },
+            fresh: lastInput.current?.fresh ?? false,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok || !res.body) {
+          // Keep the conversation; take back the unsent answer and offer the one action that helps.
+          const recovery = recoveryFor(res.status);
+          show({
+            ...v,
+            clarify: {
+              ...v.clarify,
+              sending: false,
+              recovery,
+              active: recovery.action === "retry" ? v.clarify.active : null,
+            },
+          });
+          return;
+        }
+        await consume(res, sending);
+      } catch (err) {
+        fail(controller, err);
       }
-      await consume(res, sending);
-    } catch (err) {
-      fail(controller, err);
-    }
-  }, [consume, fail, show]);
+    },
+    [consume, fail, show],
+  );
 
   /** Start the same brief again (after an expired or already-answered question), keeping nothing stale. */
   const restart = useCallback(() => {
@@ -226,15 +311,26 @@ export function useCrashTest() {
   }, [show]);
 
   /** Show a finished run again (a saved chat), without running anything. */
-  const restore = useCallback((result: RunState | null, items: ClarifyItem[] = []) => {
-    abort.current?.abort();
-    const clarify = { ...emptyClarify, items };
-    show(
-      result
-        ? { ...initial, phase: "done", result, plan: result.plan, initialPlan: result.initialPlan, evidence: result.evidenceLedger, clarify }
-        : { ...initial, clarify },
-    );
-  }, [show]);
+  const restore = useCallback(
+    (result: RunState | null, items: ClarifyItem[] = []) => {
+      abort.current?.abort();
+      const clarify = { ...emptyClarify, items };
+      show(
+        result
+          ? {
+              ...initial,
+              phase: "done",
+              result,
+              plan: result.plan,
+              initialPlan: result.initialPlan,
+              evidence: result.evidenceLedger,
+              clarify,
+            }
+          : { ...initial, clarify },
+      );
+    },
+    [show],
+  );
 
   return { view, run, answer, restart, retry, cancel, reset, restore };
 }
