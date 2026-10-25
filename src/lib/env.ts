@@ -94,7 +94,15 @@ export function getLlmEnv(env: Env = process.env) {
 }
 
 export function getRedisEnv(env: Env = process.env) {
-  const e = load("Redis cache", redisSchema, env);
+  // Vercel's Upstash Marketplace integration currently injects KV_REST_API_* names, while
+  // direct Upstash connections use UPSTASH_REDIS_REST_*. Accept both without copying secrets.
+  const e = load("Redis cache", redisSchema, {
+    ...env,
+    UPSTASH_REDIS_REST_URL:
+      env.UPSTASH_REDIS_REST_URL?.trim() || env.KV_REST_API_URL?.trim(),
+    UPSTASH_REDIS_REST_TOKEN:
+      env.UPSTASH_REDIS_REST_TOKEN?.trim() || env.KV_REST_API_TOKEN?.trim(),
+  });
   return { url: e.UPSTASH_REDIS_REST_URL, token: e.UPSTASH_REDIS_REST_TOKEN };
 }
 
