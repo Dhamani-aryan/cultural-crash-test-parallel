@@ -518,23 +518,17 @@ export default function JudgeGraphScene(props: SceneProps & { onMiss: () => void
       j.el.style.transform = `translate(${spot.x}px, ${spot.y}px)`;
     }
 
-    // No line may run behind a label: take the first route that clears every label, else hide
-    // the segments that would pass behind one.
+    // Keep the route chosen by the deterministic layout stable. Camera zoom changes projected
+    // label rectangles, so switching to a curved alternative here made straight edges visibly
+    // reroute while the user zoomed. Hide only the overlapping segments instead.
     for (const e of scene.graph.edges) {
       const route = scene.layout.routes[e.id];
       if (!route || !visuals.edges.get(e.id)?.inView) continue;
-      let pick = { alt: 0, hidden: new Set<number>() };
-      for (let alt = 0; alt <= route.alternatives.length; alt++) {
-        const pts = livePoints(route, alt, e, scene.layout, disp).map((p) => project(p));
-        const hidden = new Set<number>();
-        for (let k = 0; k < pts.length - 1; k++) if (labels.some((r) => segmentHits(pts[k], pts[k + 1], r))) hidden.add(k);
-        if (alt === 0) pick = { alt, hidden };
-        if (!hidden.size) {
-          pick = { alt, hidden };
-          break;
-        }
-      }
-      choice.set(e.id, pick);
+      const pts = livePoints(route, 0, e, scene.layout, disp).map((p) => project(p));
+      const hidden = new Set<number>();
+      for (let k = 0; k < pts.length - 1; k++)
+        if (labels.some((r) => segmentHits(pts[k], pts[k + 1], r))) hidden.add(k);
+      choice.set(e.id, { alt: 0, hidden });
     }
   };
   const keep = (key: string, el: HTMLElement | null) => {

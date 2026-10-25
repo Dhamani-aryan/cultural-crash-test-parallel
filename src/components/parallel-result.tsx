@@ -42,7 +42,7 @@ function Cell({
   source?: string | null;
 }) {
   return (
-    <div>
+    <div className="min-w-0 break-words">
       <p
         className={`text-[15px] leading-5 text-ink ${emphasis ? "font-semibold" : c.state === "not_specified" || c.state === "abstained" ? "text-muted" : "font-medium"}`}
       >
@@ -60,23 +60,14 @@ function ClaimList({ title, claims, tone }: { title: string; claims: ClaimView[]
   return (
     <div>
       <p className={`text-xs font-semibold ${tone}`}>{title}</p>
-      <ul className="mt-1 space-y-1">
+      <ul className="mt-1 space-y-2">
         {claims.map((c) => (
           <li key={c.claimId} className="text-[13px] leading-5 text-ink-2">
-            <span className="text-muted">
-              {c.dimension} · {c.source}
-              {c.decisive ? " · decisive" : ""}:
-            </span>{" "}
             {c.text}
             {c.limitations.length > 0 && (
               <span className="text-muted"> ({c.limitations.join(" ")})</span>
             )}
-            {c.evidenceIds.length > 0 && (
-              <span className="font-mono text-[11px] text-muted">
-                {" "}
-                [{c.evidenceIds.join(", ")}]
-              </span>
-            )}
+            <span className="text-muted"> Source: {c.source}.</span>
           </li>
         ))}
       </ul>
@@ -84,7 +75,51 @@ function ClaimList({ title, claims, tone }: { title: string; claims: ClaimView[]
   );
 }
 
-function Row({ r }: { r: RowView }) {
+function plainSupportReason(r: RowView): string | null {
+  const support = r.support.find((claim) => claim.decisive) ?? r.support[0];
+  if (!support) return null;
+  if (support.source !== "Qloo" && support.source !== "Qloo entity data") return support.text;
+  const fit: Record<Slot, string> = {
+    artist_music: "music choice",
+    brand_collaboration: "collaboration partner",
+    event_place: "venue",
+    creative_direction: "creative direction",
+  };
+  return `${r.final.label} was the strongest ${fit[r.slot]} match found for the intended audience and the rest of the plan.`;
+}
+
+function rowReason(r: RowView, operational?: OperationalAudit): string {
+  const override = r.slot === "event_place" ? operational?.override : undefined;
+  if (override && r.final.label === override.toVenue) {
+    const kept = r.you.label === override.toVenue;
+    return `The cultural evidence process initially recommended ${override.fromVenue}. A current check of official venue sources found that ${override.reason.replace(/^.*?failed the operational check:\s*/i, "").replace(/\s+No operationally viable alternative was established\.?$/i, "")}. We therefore ${kept ? `kept your choice, ${override.toVenue}` : `moved to ${override.toVenue}`}.`;
+  }
+  const support = plainSupportReason(r);
+  const concern = r.counter.find((claim) => claim.decisive) ?? r.counter[0];
+  const agentAlternative = r.alternatives.find((alternative) =>
+    alternative.track.toLowerCase().includes("agent"),
+  );
+  const hasUserChoice =
+    !!r.you.candidateId && r.you.state !== "not_specified" && r.you.state !== "abstained";
+  const sameAsUser = hasUserChoice && r.you.label === r.final.label;
+  const opening = sameAsUser
+    ? `We kept your choice, ${r.final.label}.`
+    : hasUserChoice
+      ? `We changed this choice from ${r.you.label} to ${r.final.label}.`
+      : `The final plan uses ${r.final.label}.`;
+  const evidence = support
+    ? ` ${support}`
+    : concern
+      ? ` It remains the strongest complete-plan option despite this concern: ${concern.text}`
+      : " No tested alternative produced a stronger complete plan.";
+  const comparison =
+    agentAlternative && agentAlternative.label !== r.final.label
+      ? ` The evidence agent also tested ${agentAlternative.label}, but it finished as ${agentAlternative.status.toLowerCase()}.`
+      : "";
+  return `${opening}${evidence}${comparison}`;
+}
+
+function Row({ r, operational }: { r: RowView; operational?: OperationalAudit }) {
   return (
     <tbody className="border-t-2 border-line first:border-t-0">
       <tr className="align-top">
@@ -113,11 +148,14 @@ function Row({ r }: { r: RowView }) {
             <summary className="min-h-9 cursor-pointer py-1 text-xs font-medium text-accent">
               Why this won
             </summary>
-            <div className="grid gap-3 pb-3 pt-1 md:grid-cols-3">
-              <ClaimList title="Evidence for it" claims={r.support} tone="text-supported" />
-              <ClaimList title="Evidence against it" claims={r.counter} tone="text-conflict" />
+            <p className="max-w-4xl pb-3 text-sm leading-6 text-ink-2">
+              {rowReason(r, operational)}
+            </p>
+            <div className="max-w-4xl space-y-4 pb-3">
+              <ClaimList title="Why it fits" claims={r.support} tone="text-supported" />
+              <ClaimList title="What argues against it" claims={r.counter} tone="text-conflict" />
               <ClaimList
-                title="Unknown or unverified"
+                title="What still needs checking"
                 claims={r.uncertain}
                 tone="text-unresolved"
               />
@@ -134,6 +172,82 @@ function Row({ r }: { r: RowView }) {
         </td>
       </tr>
     </tbody>
+  );
+}
+
+function DecisionOverview({ state, rows }: { state: RunState; rows: RowView[] }) {
+  const p = state.parallel!;
+  const screened = p.agent
+    ? new Set(p.agent.pools.map((candidate) => `${candidate.slot}:${candidate.name}`)).size
+    : 0;
+  const bundles = p.agent?.bundlesTested ?? 0;
+  const changed = rows.filter(
+    (row) =>
+      row.you.candidateId &&
+      row.you.state !== "not_specified" &&
+      row.you.state !== "abstained" &&
+      row.you.label !== row.final.label,
+  );
+  const kept = rows.filter(
+    (row) =>
+      row.you.candidateId &&
+      row.you.state !== "not_specified" &&
+      row.you.state !== "abstained" &&
+      row.you.label === row.final.label,
+  );
+  const stated = rows.filter(
+    (row) =>
+      row.you.candidateId && row.you.state !== "not_specified" && row.you.state !== "abstained",
+  ).length;
+  const override = p.operational?.override;
+  const finalVenue = rows.find((row) => row.slot === "event_place")?.final.label;
+  const venueCheck = p.operational?.checks.find((check) => check.venue === finalVenue);
+  return (
+    <section aria-labelledby="decision-summary" className="rounded-xl border border-line bg-panel px-5 py-5 shadow-sm">
+      <p className={eyebrow}>Recommendation in plain language</p>
+      <h3 id="decision-summary" className="mt-1 text-lg font-semibold tracking-[-0.02em] text-ink">
+        Why this is the final plan
+      </h3>
+      <div className="mt-3 space-y-2 text-sm leading-6 text-ink-2">
+        <p>
+          {kept.length
+            ? `We kept ${kept.length} of your ${stated} stated choices because they remained competitive when the complete plans were compared.`
+            : "The final plan did not preserve any stated choice without re-testing it."}
+          {changed.length
+            ? ` We changed ${changed.map((row) => `${row.title.toLowerCase()} to ${row.final.label}`).join(" and ")}.`
+            : " No choice was changed merely to make the plan different."}
+        </p>
+        {changed.map((row) => {
+          const reason = plainSupportReason(row);
+          return reason ? <p key={row.slot}>Why: {reason}</p> : null;
+        })}
+        {override && (
+          <p>
+            The cultural evidence process initially preferred {override.fromVenue}. A live check of official venue sources found a concrete operational conflict, so the deterministic safety gate {override.toVenue ? `moved the final plan to ${override.toVenue}` : "left the venue unresolved"}. This web check did not rewrite the cultural scores; it only prevented an operationally invalid venue from winning.
+          </p>
+        )}
+        {!override && venueCheck?.status === "verified_fit" && (
+          <p>
+            The live web check also confirmed that {venueCheck.venue} is operationally plausible for the proposed event. Booking terms, availability and final production requirements still need direct confirmation.
+          </p>
+        )}
+        {!override && venueCheck?.status === "unverified" && (
+          <p>
+            The cultural case for {venueCheck.venue} was strongest, but the live web check could not confirm enough current operational information. Treat the venue recommendation as provisional until capacity, event format and product-demonstration conditions are confirmed directly.
+          </p>
+        )}
+        {!override && venueCheck?.status === "verified_conflict" && (
+          <p>
+            The live web check found an operational conflict for {venueCheck.venue}. The venue should not be treated as approved until that conflict is resolved by a person.
+          </p>
+        )}
+        {p.agent && (
+          <p>
+            The three columns below are the finalists, not the whole search. The evidence agent screened {screened} candidate choices across the four decision areas and tested {bundles} complete plan combination{bundles === 1 ? "" : "s"}. The strongest agent plan was then compared with your plan and the independent LLM plan.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -324,6 +438,8 @@ export function ParallelRunResult({ state }: { state: RunState }) {
         </button>
       </header>
 
+      <DecisionOverview state={state} rows={view.rows} />
+
       <section aria-labelledby="parallel-comparison">
         <div className="mb-4">
           <h3
@@ -334,7 +450,14 @@ export function ParallelRunResult({ state }: { state: RunState }) {
           </h3>
         </div>
         <div className="overflow-x-auto rounded-xl border border-line bg-panel shadow-sm">
-          <table className="w-full min-w-[860px] border-collapse">
+          <table className="w-full min-w-[920px] table-fixed border-collapse">
+            <colgroup>
+              <col className="w-[15%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[22%]" />
+              <col className="w-[27%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-line bg-[#e9e7e1] text-left">
                 {["Choice", "You", "LLM", "Evidence-first agent", "Final verdict"].map((h, i) => (
@@ -348,7 +471,7 @@ export function ParallelRunResult({ state }: { state: RunState }) {
               </tr>
             </thead>
             {view.rows.map((r) => (
-              <Row key={r.slot} r={r} />
+              <Row key={r.slot} r={r} operational={p.operational} />
             ))}
           </table>
         </div>

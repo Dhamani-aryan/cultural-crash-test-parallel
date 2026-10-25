@@ -90,11 +90,36 @@ describe("parallel results", () => {
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain("View details");
     expect(html).toContain("Plan comparison");
+    expect(html).toContain("Recommendation in plain language");
+    expect(html).toContain("The three columns below are the finalists, not the whole search");
+    expect(html).toContain("candidate choices across the four decision areas");
+    expect(html).toContain("complete plan combination");
     expect(html).not.toContain("Decision stability");
     expect(html).not.toContain("Qloo checks · model calls");
     expect(html).not.toContain("How the verdict was reached");
     expect(html).not.toContain("Decision graph");
     expect(html).not.toMatch(/predicted sales|guaranteed|will sell/i);
+  });
+
+  it("surfaces an unresolved live venue check in marketer language", async () => {
+    const state = await parallel();
+    const venue = parallelView(state)!.rows.find((row) => row.slot === "event_place")!.final.label;
+    state.parallel!.operational = {
+      version: "operational:v1",
+      checkedAt: "2026-10-25T00:00:00.000Z",
+      checks: [{
+        venue,
+        city: "London",
+        status: "unverified",
+        finding: "Not enough current information.",
+        facts: [],
+        limitations: [],
+        sources: [],
+      }],
+    };
+    const html = renderToStaticMarkup(<RunResult state={state} />);
+    expect(html).toContain(`The cultural case for ${venue} was strongest`);
+    expect(html).toContain("Treat the venue recommendation as provisional");
   });
 
   it("projects the parallel run into the same collision-safe decision graph used by the UI", async () => {
