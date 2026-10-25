@@ -799,8 +799,8 @@ describe("v3: honest outcomes and versions", () => {
 
   it("records the v3 architecture and what fixed the run's behaviour", async () => {
     const { p } = await run();
-    expect(PARALLEL_VERSION).toBe("parallel:v6");
-    expect(p.architectureVersion).toBe("parallel:v6");
+    expect(PARALLEL_VERSION).toBe("parallel:v7");
+    expect(p.architectureVersion).toBe("parallel:v7");
     expect(p.config).toMatchObject({
       contractVersion: "contract:v1",
       screensVersion: "screens:v6",

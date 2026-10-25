@@ -754,6 +754,8 @@ export interface ParallelResult {
   agent?: AgentRecord;
   /** parallel:v3: what fixed the run's behaviour, frozen with it. */
   config?: RunConfig;
+  /** Bounded official-source venue verification, run after the cultural comparison. */
+  operational?: import("@/lib/operational/types").OperationalAudit;
 }
 
 export interface RunConfig {

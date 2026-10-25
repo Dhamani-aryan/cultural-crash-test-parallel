@@ -24,6 +24,7 @@ import { LaunchBriefSchema, type LaunchBriefInput, type RunEvent } from "@/lib/c
 import type { LlmClient } from "@/lib/llm/types";
 import { marketById } from "@/lib/markets";
 import type { QlooClient } from "@/lib/qloo";
+import type { OperationalResearchClient } from "@/lib/operational/types";
 import { errorResponse, jsonError } from "./errors";
 import { sseResponse } from "./sse";
 
@@ -32,6 +33,7 @@ export interface Deps {
   llm: LlmClient;
   /** Cache hits and outbound Qloo requests for this run, when the client measures them. */
   qlooStats?: { hits: number; requests: number };
+  operational?: OperationalResearchClient;
 }
 
 const AnswerInputSchema = z.object({

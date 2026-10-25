@@ -1332,8 +1332,8 @@ Use models for language and bounded comparison; use code for state, policy, evid
 Current behavior versions are defined in [`src/lib/crashtest/version.ts`](../src/lib/crashtest/version.ts):
 
 - base run: `crash:v15`;
-- parallel engine: `parallel:v6`;
-- evidence rubric: `evidence:v6`;
+- parallel engine: `parallel:v7`;
+- evidence rubric: `evidence:v7`;
 - adjudication: `adjudicate:v2`;
 - screens: `screens:v6` in [`src/lib/crashtest/screens.ts`](../src/lib/crashtest/screens.ts);
 - intent contract: `contract:v1` in [`src/lib/crashtest/intent.ts`](../src/lib/crashtest/intent.ts).

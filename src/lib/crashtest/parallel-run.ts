@@ -25,6 +25,12 @@ import type { RunDeps, RunOptions } from "./run";
 import { SCREENS_VERSION, type Centroid, type RoleCheck } from "./screens";
 import { auditRecommendationStability } from "./stability";
 import {
+  addOperationalClaims,
+  applyOperationalGate,
+  operationalVenues,
+} from "@/lib/operational/gate";
+import type { OperationalAudit, VenueOperationalCheck } from "@/lib/operational/types";
+import {
   ANCHOR_HYPOTHESIS_SYSTEM,
   CHOICE_COUNTRIES_SYSTEM,
   buildUserTrack,
@@ -516,7 +522,6 @@ export async function runParallelCrashTest(
   }
 
   // ---- the final verdict, from recorded facts ----
-  const matrix = matrixOf(candidates);
   const empty: AdjudicationResult = {
     stage: "final",
     candidateIds: contenders.map((c) => c.candidateId),
@@ -532,7 +537,59 @@ export async function runParallelCrashTest(
     flagged: [],
     evidenceOrder: contenders.map((c) => c.candidateId),
   };
-  const fin = final ?? empty;
+  let fin = final ?? empty;
+  let operational: OperationalAudit | undefined;
+  if (deps.operational && candidates.length && !state.stopReason) {
+    const venues = operationalVenues(candidates, fin);
+    if (venues.length) {
+      stage("verify", "Checking the original and leading venue against current operational sources");
+      const started = Date.now();
+      try {
+        const checked = await deps.operational.verifyVenues({
+          venues,
+          city: market.label,
+          brief: {
+            productCategory: brief.productCategory,
+            launchGoal: brief.launchGoal,
+            audienceDescription: brief.audienceDescription,
+            sourceText: brief.sourceText,
+          },
+          signal: opts.signal,
+        });
+        state.llmCalls += checked.modelCalls;
+        usage.improvement.llmCalls += checked.modelCalls;
+        usage.improvement.ms += Date.now() - started;
+        const gated = applyOperationalGate(candidates, fin, checked.checks);
+        fin = gated.result;
+        operational = {
+          version: "operational:v1",
+          checkedAt: new Date().toISOString(),
+          checks: checked.checks,
+          override: gated.override,
+        };
+      } catch (error) {
+        const finding =
+          error instanceof Error
+            ? `Operational verification was unavailable: ${error.message}`
+            : "Operational verification was unavailable.";
+        const checks: VenueOperationalCheck[] = venues.map((venue) => ({
+          venue,
+          city: market.label,
+          status: "unverified",
+          finding,
+          facts: [],
+          limitations: ["Needs a person to confirm directly with the venue."],
+          sources: [],
+        }));
+        operational = {
+          version: "operational:v1",
+          checkedAt: new Date().toISOString(),
+          checks,
+        };
+      }
+    }
+  }
+  const matrix = addOperationalClaims(matrixOf(candidates), candidates, operational?.checks ?? []);
   let chosenId: string | null = null;
   let decidedBy: FinalVerdict["decidedBy"] = "none";
   if (fin.verdict === "winner" && fin.winnerCandidateId) {
@@ -579,6 +636,7 @@ export async function runParallelCrashTest(
     anchorNotes,
     anchorSource,
     stability,
+    operational,
   });
 
   state.plan = chosen?.plan ?? null;
@@ -651,6 +709,7 @@ export async function runParallelCrashTest(
         sampling: "provider default (no temperature or seed is set); outputs are not deterministic",
         anchorsFrozenFrom: opts.anchors?.from,
       },
+      operational,
     };
   state.finishedAt = new Date().toISOString();
   emit({ type: "done", state });
@@ -679,6 +738,7 @@ function finalVerdict(x: {
   anchorNotes: string[];
   anchorSource: ParallelResult["anchorSource"];
   stability?: ParallelResult["stability"];
+  operational?: OperationalAudit;
 }): FinalVerdict {
   const { chosen, fin, matrix } = x;
   const humanChecks: string[] = [];
@@ -727,10 +787,17 @@ function finalVerdict(x: {
       humanChecks.push(
         `${SLOT_LABEL[slot]} "${comp.label}": ${COMPONENT_STATE_LABEL[st].toLowerCase()}. ${x.finalEval?.components.find((c) => c.slot === slot)?.finding ?? ""}`.trim(),
       );
-    if (comp && slot === "event_place")
-      humanChecks.push(
-        `Confirm that ${comp.label} can host the launch: capacity, dates and willingness are not in Qloo.`,
+    if (comp && slot === "event_place") {
+      const operational = x.operational?.checks.find(
+        (check) => check.venue.toLowerCase() === comp.label.toLowerCase(),
       );
+      humanChecks.push(
+        operational?.status === "verified_fit"
+          ? `Confirm ${comp.label}'s dates, price and willingness; its event-format feasibility was supported by the cited operational source.`
+          : operational?.finding ??
+              `Confirm that ${comp.label} can host the launch: capacity, dates and willingness are not in Qloo.`,
+      );
+    }
   }
   for (const c of chosen
     ? claimsOf(matrix, chosen.candidateId).filter((c) => c.ruleId === "R-unverifiable-rule")

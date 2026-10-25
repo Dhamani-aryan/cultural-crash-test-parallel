@@ -1,8 +1,8 @@
 ﻿# Parallel three-track architecture
 
-**Status:** experimental, behind `RECOMMENDATION_ARCHITECTURE=parallel`. The sequential engine (`crash:v15`) remains the default and the control until the parallel engine wins the agreed evaluation, including blind human review.
+**Status:** the standalone repository defaults to the parallel engine. Set `RECOMMENDATION_ARCHITECTURE=sequential` only to run the `crash:v15` control.
 
-**Versions:** run `crash:v15+parallel:v2` Â· base rubric `crash-v1` Â· evidence rubric `evidence:v1` Â· adjudication `adjudicate:v1`. Recordings key on all of these plus the ranking. Sequential keys are unchanged, so existing recordings stay valid.
+**Versions:** run `crash:v15+parallel:v7` · base rubric `crash-v1` · evidence rubric `evidence:v7` · adjudication `adjudicate:v2`. Recordings key on all of these plus the ranking. Sequential keys are unchanged, so existing recordings stay valid.
 
 ## What it does
 
@@ -18,7 +18,9 @@ measurement anchors      â””â”€ A: evidence-first: screened Qloo candi
                          Bounded improvement: union and swap hybrids, targeted Qloo search,
                          each re-tested as a complete plan (quick 1 round, thorough 3)
                                    â†“
-                         Final blind adjudication (two orders) â†’ final plan re-tested
+                         Final blind adjudication (two orders) → final plan re-tested
+                                   ↓
+                         bounded operational venue check → deterministic feasibility veto
 ```
 
 The final plan can be the user's, the LLM's, the agent's or a hybrid. Tests show each can win (`tests/crashtest/parallel.test.ts`, 13â€“16).
@@ -30,6 +32,7 @@ The final plan can be the user's, the LLM's, the agent's or a hybrid. Tests show
 | `src/lib/crashtest/adjudicate.ts` | Hard gates, merging identical plans, blind prompts with aliased claim IDs, rotated orders, instability, commercial-claim stripping |
 | `src/lib/crashtest/hybrid.ts` | Deterministic challenger, hybrids, acceptance guard, bounded rounds |
 | `src/lib/crashtest/parallel-run.ts` | The controller: concurrency, per-track counters, budgets, final verdict |
+| `src/lib/operational/` | Optional search of the original and leading venue, official-source reading, deterministic feasibility veto |
 | `src/lib/crashtest/parallel-view.ts` | Pure view model, decision path and Markdown report |
 | `src/components/parallel-result.tsx` | Choice Â· You Â· LLM Â· Evidence-first agent Â· Final verdict |
 | `eval/scenario-run.ts`, `eval/scenario-compare.ts` | The 15-scenario runs and the architecture comparison |
@@ -45,19 +48,18 @@ The final plan can be the user's, the LLM's, the agent's or a hybrid. Tests show
 1. **Claim stance is three-way.** The specification's `supports: boolean` can't express "unknown", which it also requires to stay distinct. `EvidenceClaim.stance` is `supports | contradicts | unknown`.
 2. **One shared measurement audience.** All plans are scored against the same anchors (the user's, or model-suggested hypotheses from the brief alone, shown for confirmation). Track A also retrieves under those anchors, so its in-run evidence is favoured by construction. The 15-scenario comparison therefore re-scores both architectures' final plans under both architectures' anchor sets.
 3. **Track A keeps the user's choices** (from Track U, never from L) and fills only open slots. If the user specifies every slot, U, L and A are the same plan. Identical plans are merged before judging and keep the most direct owner's identity (user, then LLM, agent, hybrid). So "your plan wins" means every track arrived at it.
-4. **Hard vetoes are the brief's rules only**: excluded names, locks, phrases a hard rule rules out, the launching brand as its own collaborator, and a venue outside the city's country. An unsuitable venue format is a strong contradicting claim, not a veto. A user's own choice that trips a ruled-out phrase is flagged for a person, not vetoed.
+4. **Hard vetoes are the brief's rules plus verified operational impossibility**: excluded names, locks, phrases a hard rule rules out, the launching brand as its own collaborator, a venue outside the city's country, or a concrete venue conflict stated by the venue/owner's official source. Cultural taste never becomes an operational veto. A user's own choice that trips a ruled-out phrase is flagged for a person, not vetoed.
 5. **Decision policy as a vector** (`evidenceVector`): hard failures â†’ user intent kept â†’ completeness â†’ audience and role fit â†’ locality and coherence â†’ feasibility and entity â†’ distinctiveness. Coverage (confidence) is deliberately left out of the ranking. The deterministic order is shown beside the judge's verdict and is used only when the verdict is a tie or unstable; it is then flagged for a person.
 6. **The improvement guard puts the brief before Qloo.** A hybrid is rejected if it breaks a hard rule, adds a violation, loses brief or role fit the incumbent had, or costs a supported choice without removing a contradiction. It is also rejected unless the complete-plan re-test shows a material improvement. The brief-fit guard was added after a live run showed a targeted search trading a brand attribute for better Qloo scores.
 7. **Brief fit for an open brand slot.** The inherited rule requires a partner's Qloo description to share a product or attribute term. For a brief whose only terms are generic ("streetwear") no brand can pass. In the agent's initial mode the rule applies only when the brief has testable terms. The sequential engine is unchanged.
 8. **Attribute matching uses word stems** (as `fitsBrief` does), so "minimalism" carries "minimalist". This was a defect found in the first live run: the judge was citing an exact-word miss.
 9. **No verdict-writing model call** in parallel runs. The headline and every reason are deterministic projections of the recorded state.
 
-## Deferred, with reasons
+## Later work
 
-- **3D decision graph for parallel runs.** The specification asks for graph polish only after the trace stabilises. Parallel runs have a tested decision path (`parallelView(...).path`: three branches, evidence, blind comparison, hybrids, final) and a textual "how the verdict was reached". The 3D view remains sequential-only.
-- **Layer 5 robustness** beyond what is cheap. Implemented: coverage and missingness, dependence on model-suggested anchors (a claim and a human check), complete-plan swaps through hybrids, and quick versus thorough budgets. Not implemented: leave-one-anchor-out stability, prompt-wording sensitivity and cross-view agreement claims. Each multiplies Qloo calls per plan and needs its own frozen evaluation first.
+- **Further robustness.** Coverage, missingness, model-suggested-anchor warnings, complete-plan swaps, blind-order checks and leave-one-anchor-out stability are implemented. Prompt-wording sensitivity and cross-view agreement remain evaluation work because each multiplies calls and needs a frozen baseline.
 - **Model-based challenger.** The challenger is deterministic, reading the matrix and the commercial-claim filter. That is cheaper and testable, and avoids open-ended debate.
-- **`official_source` and `human` evidence** are defined but unused: there is no web browsing (a non-goal) and no human input inside a run.
+- **General web research remains out of scope.** `official_source` is used only by the bounded venue feasibility gate. `human` evidence is still not collected inside a run.
 
 ## Known limitations
 

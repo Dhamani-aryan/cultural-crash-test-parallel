@@ -19,12 +19,12 @@ Built for the **Qloo Agentic Hackathon 2026**.
 conversation ─► frozen brief ─────────┼─► LLM-only plan ───────────────────┼─► shared evidence matrix
                                       └─► evidence agent + Qloo search ────┘             │
                                                                                          ▼
-                                  stability-qualified verdict ◄─ finalist stress tests ◄─ blind comparison
+                    operationally checked verdict ◄─ finalist stress tests ◄─ blind comparison
 ```
 
 The three plans are genuinely independent: the LLM-only track never sees Qloo, and the evidence agent never sees the LLM draft. The agent pools candidates from several Qloo retrieval views, screens them against the brief, tests a bounded set of complete plans, and challenges its own weakest supported choice. Every plan is then evaluated by the same evidence rules and compared under anonymous IDs in two presentation orders.
 
-Before a recommendation is called stable, `parallel:v6` stress-tests the winner against its strongest distinct runner-up. It reuses the two blind-order judgments, then removes up to three audience anchors one at a time and re-tests both complete plans through Qloo. The result screen reports how many checks preserved, tied, or reversed the decision. Any reversal turns the headline into **Provisional plan** and creates a targeted human check; missing evidence is never silently converted into failure. v6 also ranks explicit brief contradictions and structured role doubts before affinity, uses the same strict venue-role screen in agent selection and blind comparison, and never reduces a relational free-text rule such as “don’t mix unrelated fashion and music” to “avoid fashion.”
+Before a recommendation is called stable, `parallel:v7` stress-tests the winner against its strongest distinct runner-up. It reuses the two blind-order judgments, then removes up to three audience anchors one at a time and re-tests both complete plans through Qloo. The result screen reports how many checks preserved, tied, or reversed the decision. Any reversal turns the headline into **Provisional plan** and creates a targeted human check; missing evidence is never silently converted into failure. v7 also runs a bounded operational check on the user's original venue and the leading venue. Qloo still decides cultural fit; only an official-source contradiction such as the wrong establishment type, closure, unsupported event format or insufficient stated capacity can veto the preliminary venue. Live availability, price and willingness remain human checks.
 
 - **Intake** ([`src/lib/intake/`](src/lib/intake/)). A chat, like ChatGPT. You describe the launch in your own words, answer any follow-up questions, or say "figure out the rest" to have the assistant make (and state) the assumptions.
   - The model reads only the facts you state into a "What I understand" brief. Each field is labelled *from you*, *suggested* or *confirmed*, and you can edit it.
@@ -61,6 +61,7 @@ Before a recommendation is called stable, `parallel:v6` stress-tests the winner 
   - the Qloo call budget (700 / 1,400), enforced before each call.
 
   The report says which one stopped the run.
+- **Operational verification.** When `BRAVE_SEARCH_API_KEY` is configured, the app searches only the original and leading venue, reads the returned excerpts as untrusted evidence, and accepts a feasibility veto only when the venue or owner's official source supports it. The details panel records what the cultural comparison recommended, what the operational source caught, and why the final course changed. A search failure never becomes a negative fact.
 - **Results** ([`run-result.tsx`](src/components/run-result.tsx), [`plan-comparison.tsx`](src/components/plan-comparison.tsx), [`judge-graph-view.tsx`](src/components/judge-graph-view.tsx), [`decision-trace.ts`](src/lib/crashtest/decision-trace.ts)). Results open on a plain introduction, your direction, and a run receipt counted from the recorded run (choices tested, candidates considered, re-tested, accepted and retained; Qloo checks, plus requests actually sent to Qloo when measured; constraints preserved; full-plan re-tests; live or recorded, and the date, from the run's own provenance). A **Table / Decision graph** switch sits above the agent's method in one line. The **table** is the default: You / LLM / Agent per choice, a Why row of plain recorded sentences (the original and who supplied it, what the test returned, the alternative, its evidence, the full-plan re-test), and a **Decision trace →** link into the graph. The **decision graph** (lazy-loaded Three.js through React Three Fiber) has a toolbar above the canvas (Fit graph, Replay decision path / Stop replay) and the legend below it. The overview reads left to right (your brief, the four decisions, the final plan). Edges are routed curves that stop at each shape's edge and clear unrelated nodes, and no line runs behind a label. Labels are placed every frame by priority, inside the canvas, never overlapping. The camera is front-facing, and Fit graph returns to that view. Below the canvas, **Decision details** shows the recorded process for the focused choice: original, what the test returned, every alternative tested with its outcome, why each was rejected, the acceptance checks the kept one passed, the full-plan result, the constraints that applied, and the selected node's Qloo evidence (query, results, context, coverage, recorded or live source). The **Decision trace** lists every step in order; evidence and candidate rows are buttons that select the node, focus the camera and move to Decision details. Replay is an ordered timeline: each line grows from source to target, the node appears as it arrives, and rejected candidates recede after their re-test. Reduced motion shows the final state. The table, the graph and the trace are projections of the same `buildDecisionTrace` output, so they cannot disagree, and nothing on screen is parsed back out of a sentence.
 - **Compare plans** ([`compare.ts`](src/lib/crashtest/compare.ts)).
   - Code decides whether the LLM-only plan or the agent's is better supported, choice by choice and overall. The order is: hard constraints, contradicted choices, supported choices, evidence coverage, then the score.
@@ -70,7 +71,7 @@ Before a recommendation is called stable, `parallel:v6` stress-tests the winner 
   - Markdown and JSON export.
   - The model writes only a 2–3 sentence verdict, from the recorded state.
 
-The model is used for four things only: the draft, mapping a direction onto Qloo tags, choosing among screened candidates, and the verdict. Validation, scoring, constraints, budgets and stopping are all code.
+The model is used for the draft, mapping a direction onto Qloo tags, structured role readings, choosing among screened candidates, the blind verdict, and reading bounded venue-search excerpts. Validation, scoring, operational vetoes, constraints, budgets and stopping are all code.
 
 ## Evaluation
 
@@ -91,7 +92,7 @@ Requires Node.js 22+, a Qloo hackathon key, and a ChatGPT sign-in for the model 
 
 ```bash
 npm ci
-cp .env.example .env.local   # set QLOO_API_KEY
+cp .env.example .env.local   # set QLOO_API_KEY; add BRAVE_SEARCH_API_KEY for venue verification
 npm run llm:login            # one-time ChatGPT sign-in, saved to git-ignored .secrets/
 npm run dev                  # http://localhost:3000
 ```
@@ -113,6 +114,7 @@ New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydne
   - A name Qloo doesn't know is reported as such.
   - A Qloo error becomes an error entry in the ledger.
   - When no local candidate exists, the agent says so and explains why (for example, "of the top 40 for this audience, 38 from another country").
+  - Search excerpts can support a bounded operational gate but never prove live availability, price or willingness.
 - **Recorded runs are labelled.** The demo replays recorded runs of the example briefs so it's fast and free, and labels them as recorded with their date. "Run it live again" fetches fresh data.
 - **Raw Qloo responses are never committed** (Qloo's terms). The test fixtures are synthetic.
 
@@ -126,6 +128,7 @@ New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydne
   - evidence gathering, evaluator, planner and repair;
   - the controller (`run.ts`) and report.
 - `src/lib/qloo/`: typed Qloo client (search, entities, tags, insights including tag results and explainability), with retries, concurrency limits and a server-side cache.
+- `src/lib/operational/`: optional bounded venue search, official-source evidence reading and deterministic feasibility gate.
 - `src/lib/engine/`, `src/lib/agent/check.ts`: the locality gates and role tags, reused from the earlier Transcreate prototype (tag `transcreate-final`).
 - `src/app/api/crashtest/`: server-sent-events endpoint. It is rate-limited, and the Qloo key stays on the server.
 - `src/components/`: brief form, agent console and results.

@@ -77,7 +77,7 @@ Do not add a new architecture, broad feature or another full evaluation campaign
 **Deadline:** 25 October
 
 - [ ] Treat `G:\Qloo 2.0-parallel` and <https://github.com/Dhamani-aryan/cultural-crash-test-parallel> as the submission project. Do not submit the legacy repository.
-- [ ] Use the current parallel release line (`crash:v15+parallel:v6`) as the release candidate.
+- [ ] Use the current parallel release line (`crash:v15+parallel:v7`) as the release candidate.
 - [ ] Write down the release commit SHA before deployment.
 - [ ] Permit only blocker fixes after the release candidate is chosen: failed build, broken production authentication, broken Qloo call, misleading result, inaccessible UI or a canonical-demo regression.
 - [ ] If a code change alters decision behavior, run the smallest failure-pattern scenario that exercises that change. Do not rerun all 15 scenarios unless a true release-wide change makes it necessary.

@@ -16,6 +16,7 @@ import {
   type Slot,
   type UsageScope,
 } from "@/lib/crashtest/types";
+import type { OperationalAudit } from "@/lib/operational/types";
 
 const eyebrow = "font-mono text-[10px] uppercase tracking-[0.11em] text-muted";
 
@@ -142,6 +143,68 @@ function Stat({ label, value }: { label: string; value: string }) {
       <dt className={eyebrow}>{label}</dt>
       <dd className="mt-1 text-[15px] font-semibold text-ink">{value}</dd>
     </div>
+  );
+}
+
+export function OperationalVerification({ audit }: { audit: OperationalAudit }) {
+  return (
+    <section aria-label="Operational verification" className="space-y-3 border-t border-line pt-5">
+      <p className={eyebrow}>Operational verification</p>
+      {audit.override && (
+        <p className="max-w-3xl text-sm font-medium leading-6 text-ink">
+          The cultural comparison recommended {audit.override.fromVenue}. The operational check
+          caught this: {audit.override.reason} We therefore moved to{" "}
+          {audit.override.toVenue ?? "no final venue"}.
+        </p>
+      )}
+      <div className="grid gap-3 md:grid-cols-2">
+        {audit.checks.map((check) => (
+          <article key={check.venue} className="rounded-xl border border-line bg-panel px-4 py-4">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="font-semibold text-ink">{check.venue}</h3>
+              <span
+                className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${
+                  check.status === "verified_fit"
+                    ? "text-supported"
+                    : check.status === "verified_conflict"
+                      ? "text-conflict"
+                      : "text-unresolved"
+                }`}
+              >
+                {check.status === "verified_fit"
+                  ? "Feasible"
+                  : check.status === "verified_conflict"
+                    ? "Conflict caught"
+                    : "Unverified"}
+              </span>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-ink-2">{check.finding}</p>
+            {check.facts.length > 0 && (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-ink-2">
+                {check.facts.map((fact) => (
+                  <li key={fact}>{fact}</li>
+                ))}
+              </ul>
+            )}
+            {check.sources.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+                {check.sources.map((source) => (
+                  <a
+                    key={source.url}
+                    href={source.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-medium text-accent hover:underline"
+                  >
+                    {source.title}
+                  </a>
+                ))}
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -329,6 +392,8 @@ export function ParallelRunResult({ state }: { state: RunState }) {
           </dl>
 
           <JudgeReceipt state={state} rows={view.rows} />
+
+          {p.operational && <OperationalVerification audit={p.operational} />}
 
           <ol
             aria-label="Agent method"

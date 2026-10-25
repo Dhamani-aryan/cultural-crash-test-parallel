@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { LlmClient } from "@/lib/llm/types";
 import { marketById } from "@/lib/markets";
 import type { QlooClient } from "@/lib/qloo";
+import type { OperationalResearchClient } from "@/lib/operational/types";
 import { unverifiableRules } from "./constraints";
 import { MATERIAL_DELTA, compareEvaluations, evaluatePlan, judgeRetest, type Progress } from "./evaluate";
 import { gatherEvidence, type GatherContext } from "./gather";
@@ -43,6 +44,8 @@ export interface RunDeps {
   llm: LlmClient;
   /** Cache hits and outbound requests, when the Qloo client measures them. */
   qlooStats?: { hits: number; requests: number };
+  /** Optional bounded venue verification; Qloo remains the cultural evidence source. */
+  operational?: OperationalResearchClient;
 }
 
 export interface RunOptions {

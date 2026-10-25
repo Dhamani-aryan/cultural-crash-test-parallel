@@ -45,6 +45,7 @@ export const RULES = {
   "R-venue-format": "A venue must be filed in Qloo as a kind of place that can host the launch.",
   "R-venue-in-market": "A venue must be in the launch city's country.",
   "R-feasibility-unverified": "Capacity, availability, opening hours and willingness to take part are not in Qloo and are never assumed.",
+  "R-operational-source": "A venue feasibility claim may change the result only when an official source states a concrete operational fact.",
   "R-not-self": "The collaboration brand can't be the launching brand itself.",
   "R-ruled-out-phrase": "A choice whose Qloo description matches a phrase a hard rule rules out breaks the brief.",
   "R-brief-terms": "A partner brand shows brief fit when Qloo's description shares the product's or attributes' terms.",
@@ -496,7 +497,7 @@ const net = (claims: EvidenceClaim[], dims: EvidenceDimension[]) =>
 const PREFERENCE: Partial<Record<RuleId, number>> = { "R-user-choice": 0.5, "R-user-considered": 0.25 };
 
 /**
- * The decision policy (evidence:v6) as a vector, compared left to right:
+ * The decision policy (evidence:v7) as a vector, compared left to right:
  *   1. hard failures; 2. explicit locks kept; 3. completeness; 4. fewest explicit brief-fit
  *   contradictions; 5. fewest structured role doubts; 6. positive role and brief fit (with the
  *   user's unlocked choices as weighted preferences); 7. audience support, counted per choice so

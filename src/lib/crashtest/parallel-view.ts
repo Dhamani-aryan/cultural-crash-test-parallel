@@ -457,6 +457,21 @@ export function toParallelMarkdown(state: RunState): string {
           ...p.stability.checks.map((c) => `- ${c.label}: ${c.outcome}. ${c.detail}`),
         ]
       : []),
+    ...(p.operational
+      ? [
+          "",
+          "## Operational verification",
+          ...(p.operational.override
+            ? [
+                `- The cultural comparison recommended ${p.operational.override.fromVenue}; the operational check found: ${p.operational.override.reason} Final course: ${p.operational.override.toVenue ?? "no venue established"}.`,
+              ]
+            : []),
+          ...p.operational.checks.flatMap((check) => [
+            `- **${check.venue} — ${check.status.replaceAll("_", " ")}:** ${check.finding}`,
+            ...check.sources.map((source) => `  - [${source.title}](${source.url}) (${source.sourceType})`),
+          ]),
+        ]
+      : []),
     "",
     "## Why each choice stands",
     ...view.rows.flatMap((r) => [

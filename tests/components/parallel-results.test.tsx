@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { RunResult } from "@/components/run-result";
+import { OperationalVerification } from "@/components/parallel-result";
 import { parallelView, toParallelMarkdown } from "@/lib/crashtest/parallel-view";
 import { buildParallelJudgeGraph } from "@/lib/crashtest/parallel-judge-graph";
 import { visibleGraph } from "@/lib/crashtest/judge-graph";
@@ -23,6 +24,48 @@ const parallel = (
   });
 
 describe("parallel results", () => {
+  it("shows the operational override and official sources in the details projection", () => {
+    const html = renderToStaticMarkup(
+      <OperationalVerification
+        audit={{
+          version: "operational:v1",
+          checkedAt: "2026-10-25T00:00:00.000Z",
+          override: {
+            fromCandidateId: "agent",
+            fromVenue: "For Your Eyes Only",
+            toCandidateId: "user",
+            toVenue: "Barbican Conservatory",
+            reason: "For Your Eyes Only is a strip club, not the required launch setting.",
+          },
+          checks: [
+            {
+              venue: "Barbican Conservatory",
+              city: "London",
+              status: "verified_fit",
+              finding: "The official hire page supports product launches for this audience size.",
+              facts: ["The stated event capacity covers 220 guests."],
+              limitations: ["Dates and price remain unverified."],
+              sources: [
+                {
+                  title: "Official venue hire page",
+                  url: "https://example.com/venue",
+                  snippet: "Product launches",
+                  sourceType: "official",
+                  retrievedAt: "2026-10-25T00:00:00.000Z",
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(html).toContain("The cultural comparison recommended For Your Eyes Only");
+    expect(html).toContain("We therefore moved to");
+    expect(html).toContain("Barbican Conservatory");
+    expect(html).toContain("Official venue hire page");
+    expect(html).toContain('href="https://example.com/venue"');
+  });
+
   it("shows You, LLM, Evidence-first agent and Final verdict for every choice, with Not specified for open user slots", async () => {
     const html = renderToStaticMarkup(
       <RunResult

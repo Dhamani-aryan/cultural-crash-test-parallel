@@ -36,8 +36,10 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * several unrelated positive claims cannot hide one narratively wrong component.
  * v6: relational free-text rules remain coherence questions instead of being misread as lexical
  * bans on every noun they contain.
+ * v7: a bounded official-source venue check can veto a concrete operational contradiction after
+ * the cultural comparison; it cannot award cultural fit or invent live availability.
  */
-export const PARALLEL_VERSION = "parallel:v6";
+export const PARALLEL_VERSION = "parallel:v7";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
@@ -49,8 +51,10 @@ export const PARALLEL_VERSION = "parallel:v6";
  * affinity; positive claims can no longer cancel a material mismatch in another slot.
  * v6: only lexically verifiable avoidances become entity-level claims; relational free-text rules
  * such as "don't mix unrelated fashion and music" are not reduced to "avoid fashion".
+ * v7: official operational evidence replaces the venue-feasibility unknown when available and a
+ * verified conflict becomes a deterministic hard gate.
  */
-export const EVIDENCE_RUBRIC_VERSION = "evidence:v6";
+export const EVIDENCE_RUBRIC_VERSION = "evidence:v7";
 /** The blind, order-rotated adjudication protocol. v2 gives contradictions and role doubts priority over affinity. */
 export const ADJUDICATION_VERSION = "adjudicate:v2";
 

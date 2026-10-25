@@ -45,6 +45,11 @@ const redisSchema = z.object({
   UPSTASH_REDIS_REST_TOKEN: nonEmpty("UPSTASH_REDIS_REST_TOKEN"),
 });
 
+const operationalSchema = z.object({
+  BRAVE_SEARCH_API_KEY: nonEmpty("BRAVE_SEARCH_API_KEY"),
+  BRAVE_SEARCH_BASE_URL: z.url().default("https://api.search.brave.com/res/v1/web/search"),
+});
+
 function load<S extends z.ZodType>(area: string, schema: S, env: Env): z.infer<S> {
   // Treat empty strings from .env files as "not set" so defaults apply.
   const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ""));
@@ -82,4 +87,11 @@ export function getLlmEnv(env: Env = process.env) {
 export function getRedisEnv(env: Env = process.env) {
   const e = load("Redis cache", redisSchema, env);
   return { url: e.UPSTASH_REDIS_REST_URL, token: e.UPSTASH_REDIS_REST_TOKEN };
+}
+
+/** Optional: the core cultural test still runs when operational web verification is not configured. */
+export function getOperationalEnv(env: Env = process.env) {
+  if (!env.BRAVE_SEARCH_API_KEY?.trim()) return null;
+  const e = load("Operational search", operationalSchema, env);
+  return { apiKey: e.BRAVE_SEARCH_API_KEY, baseUrl: e.BRAVE_SEARCH_BASE_URL };
 }
