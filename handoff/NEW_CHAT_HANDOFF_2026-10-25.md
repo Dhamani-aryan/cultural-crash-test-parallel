@@ -4,7 +4,9 @@ Updated: 25 October 2026 (India)
 Active repository: `G:\Qloo 2.0-parallel`  
 GitHub repository: `Dhamani-aryan/cultural-crash-test-parallel`  
 Local branch: `experiment/parallel-tracks`, tracking `origin/main`  
-Remote `main` HEAD: `f6b00c4`
+Remote `main`: use `git rev-parse origin/main` for the current release instead of a recorded SHA.
+
+Current submission and deployment status is maintained in [`../STATUS.md`](../STATUS.md).
 
 ## Read this first
 

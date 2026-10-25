@@ -1,140 +1,142 @@
 # Cultural Crash-Test
 
-> Find the cultural mismatch before launch. Then fix it.
+> Test the cultural logic of a marketing launch before committing the budget.
 
-A launch plan is a stack of cultural bets: the music act, the collaboration brand, the pop-up venue, the creative direction. A language model can make every one of them sound plausible. Cultural Crash-Test is an agent that **treats each choice as a hypothesis and tests it against [Qloo](https://www.qloo.com/)'s taste data** for the audience and city you're launching to. It finds the weakest-supported choice, researches a better-supported alternative in Qloo, swaps only that choice, and tests the whole plan again. Every decision traces to a recorded Qloo query.
+**Live app:** [cultural-crash-test-parallel.vercel.app](https://cultural-crash-test-parallel.vercel.app)
 
-Built for the **Qloo Agentic Hackathon 2026**.
+**Submission repository:** [Dhamani-aryan/cultural-crash-test-parallel](https://github.com/Dhamani-aryan/cultural-crash-test-parallel)
 
-**Example (live run, London):** a streetwear label plans an East London pop-up for fans of Stüssy, Palace and Carhartt. The founder's picks were Travis Scott, BOXPARK Shoreditch (locked) and "playful pastel Y2K". The model drafted Vans as the collaborator.
-- **Travis Scott:** Qloo returns no affinity for him with this audience in London, so the agent marks him *No support found*. It researches London acts and swaps in **slowthai** (#1 for this audience; strongest link: Palace). It re-tests.
-- **Vans → END. Clothing.**
-- **"Playful pastel" → "industrial utility in monochrome":** Industrial, Utilitarian and Monochrome rank #2, #6 and #7 for this audience in London. "Playful" is Tokyo's top aesthetic, not London's.
-- **Result:** 1 of 4 choices supported → 4 of 4. The locked venue was never touched.
+**License:** [MIT](LICENSE)
 
-## How it works
+Built for the [Qloo Agentic Hackathon 2026](https://qloo.devpost.com/).
 
+## The problem
+
+A marketing team entering an unfamiliar city makes several connected cultural bets: the music act, collaboration partner, venue and creative direction. A general-purpose model can make each choice sound plausible without establishing whether the complete plan fits the intended audience or local context.
+
+Cultural Crash-Test treats those choices as hypotheses. It compares the marketer's plan with an independent LLM plan and an evidence-first agent plan, tests all three through Qloo, stress-tests the winner and explains the final recommendation in marketer-readable language.
+
+## What the product does
+
+1. A marketer describes the brand, objective, audience, proposed choices and practical constraints in ordinary language.
+2. The intake assistant structures the brief and asks only for materially missing information.
+3. Three plans are produced independently:
+   - the marketer's stated plan;
+   - an LLM-only plan that never sees Qloo evidence;
+   - one evidence-first agent that searches and tests a broader Qloo candidate pool.
+4. Every finalist receives the same audience, locality, role, coherence and constraint checks.
+5. The plans are compared anonymously in both presentation orders.
+6. The leading plan is stress-tested against its strongest distinct runner-up.
+7. When Brave Search is configured, official venue sources can veto a concrete operational conflict. Web search cannot award cultural fit or invent a new recommendation.
+8. The result opens with a plain-language explanation, followed by the finalist table, operational checks and an inspectable decision graph.
+
+The three displayed columns are finalists, not the entire search space. The result states how many candidates and complete plan combinations the evidence agent examined.
+
+## Why Qloo is essential
+
+Qloo is the cultural evidence layer, not a decorative lookup. The application uses Qloo Search, Entities and Insights—including tag insights and explainability—to:
+
+- resolve real artists, brands and places before testing them;
+- retrieve candidates from audience-affinity, locality and brief-fit views;
+- measure audience affinity in the selected city;
+- distinguish locally relevant choices from generic defaults;
+- test whether each choice coheres with the rest of the plan;
+- map a creative direction to Qloo aesthetic and tone tags;
+- re-test candidate replacements under the same evidence rules.
+
+Missing Qloo evidence remains unknown. It is never silently converted into a negative score.
+
+## Decision architecture
+
+```text
+natural-language brief
+        │
+        ├── marketer's plan ───────────────┐
+        ├── independent LLM plan ──────────┼── shared evidence matrix
+        └── evidence agent + Qloo search ──┘            │
+                                                        ▼
+                                     blind, order-rotated comparison
+                                                        │
+                                                        ▼
+                                           evidence stress tests
+                                                        │
+                                                        ▼
+                                    bounded official-source venue check
+                                                        │
+                                                        ▼
+                                      plain-language final recommendation
 ```
-                                      ┌─► your plan as stated ──────────────┐
-conversation ─► frozen brief ─────────┼─► LLM-only plan ───────────────────┼─► shared evidence matrix
-                                      └─► evidence agent + Qloo search ────┘             │
-                                                                                         ▼
-                    operationally checked verdict ◄─ finalist stress tests ◄─ blind comparison
-```
 
-The three plans are genuinely independent: the LLM-only track never sees Qloo, and the evidence agent never sees the LLM draft. The agent pools candidates from several Qloo retrieval views, screens them against the brief, tests a bounded set of complete plans, and challenges its own weakest supported choice. Every plan is then evaluated by the same evidence rules and compared under anonymous IDs in two presentation orders.
+The production engine is `crash:v15 + parallel:v7`, with evidence rubric `evidence:v7` and adjudication protocol `adjudicate:v2`. Models generate structured proposals and readings; code enforces schemas, budgets, screens, constraints, scoring, operational vetoes and stopping conditions.
 
-Before a recommendation is called stable, `parallel:v7` stress-tests the winner against its strongest distinct runner-up. It reuses the two blind-order judgments, then removes up to three audience anchors one at a time and re-tests both complete plans through Qloo. The result screen reports how many checks preserved, tied, or reversed the decision. Any reversal turns the headline into **Provisional plan** and creates a targeted human check; missing evidence is never silently converted into failure. v7 also runs a bounded operational check on the user's original venue and the leading venue. Qloo still decides cultural fit; only an official-source contradiction such as the wrong establishment type, closure, unsupported event format or insufficient stated capacity can veto the preliminary venue. Live availability, price and willingness remain human checks.
+## Production behavior
 
-- **Intake** ([`src/lib/intake/`](src/lib/intake/)). A chat, like ChatGPT. You describe the launch in your own words, answer any follow-up questions, or say "figure out the rest" to have the assistant make (and state) the assumptions.
-  - The model reads only the facts you state into a "What I understand" brief. Each field is labelled *from you*, *suggested* or *confirmed*, and you can edit it.
-  - Code decides what's still missing: product, launch, city, a confirmed audience, and what the brand stands for. It asks at most three questions per turn, in at most four turns.
-  - If you don't know the audience, it suggests two or three taste-defined segments, never sensitive traits, and you pick or edit one.
-  - Choices can be marked *Booked/fixed*, and an *Explore better-supported alternatives to my choices* switch is off by default.
-  - Nothing runs until you confirm the brief, and the server re-checks that before any Qloo call.
+- Next.js App Router with streamed server events for long-running crash tests.
+- OpenAI Responses API for bounded structured model work.
+- Qloo remains the source of cultural evidence.
+- Brave Search is used only for bounded operational venue verification.
+- Vercel Upstash Redis shares Qloo caching, completed-run recordings, clarification sessions and IP-based rate limits across serverless instances.
+- Brief history is stored in each visitor's browser, is private to that browser and keeps up to 30 chats.
 
-- **Independent plans.** The user's choices, an LLM-only draft, and the evidence-first agent's plan are built in parallel from the same frozen brief. The final plan can also be a fully re-tested hybrid when its complete evidence record materially beats the original tracks.
-- **Resolve.** Every name is looked up in Qloo. A name Qloo doesn't know is marked *Unresolved*, never tested as if it were real. The creative direction is mapped onto Qloo's own aesthetic and tone tags.
-- **Test.** Every choice is scored with the deterministic, versioned rubric `crash-v1` ([`evaluate.ts`](src/lib/crashtest/evaluate.ts)):
-
-  | Dimension | Weight | Qloo evidence |
-  |---|---:|---|
-  | Audience affinity | 35% | Rank among what the audience (its anchor brands/artists as signal) has affinity for in the city, with explainability naming the strongest anchor |
-  | Local relevance | 30% | From here, or distinctive in the city's own list, vs. just as big in 4 other world cities or 4 US cities |
-  | Package coherence | 25% | Rank when the plan's *other* choices are the signal: do the choices support each other? |
-  | Distinctness | 10% | Not a repeat of another choice (labelled app heuristic) |
-
-  - A dimension without evidence is left out rather than scored zero, and coverage is shown separately.
-  - Statuses are written out: *Supported*, *Weak evidence*, *No support found*, *Unresolved*, *Constraint conflict*.
-- **Repair.**
-  - Only choices the evidence **contradicts** are replaced: no support for this audience here, a hard constraint broken, a global or foreign import, or a creative direction this audience here doesn't lean to. A local choice with thin evidence, or a name Qloo doesn't know, is kept and flagged for a human. Swapping it for a better-scoring but less fitting name would game the score, not improve the plan.
-  - The weakest contradicted choice gets one targeted action. Candidates come from two sources:
-    - Qloo's list of what the audience *and* the rest of the plan have affinity for in the city;
-    - the agent's own suggestions for the job, each looked up and scored in Qloo under the same signal (names Qloo can't find, or shows no affinity for, are dropped).
-  - All candidates are screened for locality and role: a partner brand in the same kind of business, a venue that can host the event.
-  - The model ranks up to three survivors, and code checks every ID. Each is re-tested in turn; the first that makes the choice *Supported* wins, otherwise the best improvement. If none can do the job, the model says so and it becomes an open question.
-  - Only that slot changes. Candidates that don't test better are recorded as tried, not kept.
-- **Stop.** Code checks four conditions:
-  - acceptance;
-  - no material improvement for 2 rounds;
-  - the repair-round limit (3 quick, 6 thorough);
-  - the Qloo call budget (700 / 1,400), enforced before each call.
-
-  The report says which one stopped the run.
-- **Operational verification.** When `BRAVE_SEARCH_API_KEY` is configured, the app searches only the original and leading venue, reads the returned excerpts as untrusted evidence, and accepts a feasibility veto only when the venue or owner's official source supports it. The details panel records what the cultural comparison recommended, what the operational source caught, and why the final course changed. A search failure never becomes a negative fact.
-- **Results** ([`run-result.tsx`](src/components/run-result.tsx), [`plan-comparison.tsx`](src/components/plan-comparison.tsx), [`judge-graph-view.tsx`](src/components/judge-graph-view.tsx), [`decision-trace.ts`](src/lib/crashtest/decision-trace.ts)). Results open on a plain introduction, your direction, and a run receipt counted from the recorded run (choices tested, candidates considered, re-tested, accepted and retained; Qloo checks, plus requests actually sent to Qloo when measured; constraints preserved; full-plan re-tests; live or recorded, and the date, from the run's own provenance). A **Table / Decision graph** switch sits above the agent's method in one line. The **table** is the default: You / LLM / Agent per choice, a Why row of plain recorded sentences (the original and who supplied it, what the test returned, the alternative, its evidence, the full-plan re-test), and a **Decision trace →** link into the graph. The **decision graph** (lazy-loaded Three.js through React Three Fiber) has a toolbar above the canvas (Fit graph, Replay decision path / Stop replay) and the legend below it. The overview reads left to right (your brief, the four decisions, the final plan). Edges are routed curves that stop at each shape's edge and clear unrelated nodes, and no line runs behind a label. Labels are placed every frame by priority, inside the canvas, never overlapping. The camera is front-facing, and Fit graph returns to that view. Below the canvas, **Decision details** shows the recorded process for the focused choice: original, what the test returned, every alternative tested with its outcome, why each was rejected, the acceptance checks the kept one passed, the full-plan result, the constraints that applied, and the selected node's Qloo evidence (query, results, context, coverage, recorded or live source). The **Decision trace** lists every step in order; evidence and candidate rows are buttons that select the node, focus the camera and move to Decision details. Replay is an ordered timeline: each line grows from source to target, the node appears as it arrives, and rejected candidates recede after their re-test. Reduced motion shows the final state. The table, the graph and the trace are projections of the same `buildDecisionTrace` output, so they cannot disagree, and nothing on screen is parsed back out of a sentence.
-- **Compare plans** ([`compare.ts`](src/lib/crashtest/compare.ts)).
-  - Code decides whether the LLM-only plan or the agent's is better supported, choice by choice and overall. The order is: hard constraints, contradicted choices, supported choices, evidence coverage, then the score.
-  - The outcome can be the agent, the baseline, mixed, or not enough evidence, and every reason links to its evidence records. No model picks the winner.
-- **Report.**
-  - The draft and the final plan side by side, with per-choice evidence cards citing ledger IDs, a revision log (why, expected, observed), assumptions and open questions.
-  - Markdown and JSON export.
-  - The model writes only a 2–3 sentence verdict, from the recorded state.
-
-The model is used for the draft, mapping a direction onto Qloo tags, structured role readings, choosing among screened candidates, the blind verdict, and reading bounded venue-search excerpts. Validation, scoring, operational vetoes, constraints, budgets and stopping are all code.
-
-## Evaluation
-
-[`docs/EVALUATION.md`](docs/EVALUATION.md) compares the LLM-only draft with the agent's final plan on 9 fixed briefs across 5 cities. The main measures:
-- **Held-out audience anchors.** Both plans are re-scored with brands and artists the agent never saw.
-- **An evidence-based judge.** It is blind to which plan is the agent's and runs in both orders. It sees the same held-out Qloo evidence for both plans and must judge from it, not from taste.
-
-Latest run (run 16, agent `crash:v14`):
-- **Evidence judge:** prefers the agent's plan in all 9 briefs, including the 6 never used for tuning.
-- **Supported choices on held-out anchors:** 4 → 18 of 36. Support rose in every brief. Recent runs measured 17, 13 and 16 (of 32). The LLM drafts differ every run, and [`docs/DECISIONS.md`](docs/DECISIONS.md) explains the spread.
-- **A no-evidence "taste" judge** is also reported, as a reference only. It is the same model that wrote the LLM-only plan and sees no evidence, and it prefers that plan in all 9 briefs.
-
-The sample is small and the report states its limits, including the earlier runs the agent lost and why.
+Measured supported markets are New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydney, Paris and Berlin. Other cities are not silently treated as equally covered.
 
 ## Run locally
 
-Requires Node.js 22+, a Qloo hackathon key, and either an OpenAI API key or the optional ChatGPT sign-in fallback (see `.env.example`).
+Requirements: Node.js 22+, a Qloo API key and an OpenAI API key. Brave Search is optional but recommended for venue verification.
 
 ```bash
 npm ci
-cp .env.example .env.local   # set QLOO_API_KEY and OPENAI_API_KEY; add BRAVE_SEARCH_API_KEY for venue verification
-npm run dev                  # http://localhost:3000
+cp .env.example .env.local
+npm run dev
 ```
 
-To use the subscription fallback instead, set `LLM_PROVIDER=chatgpt` and run `npm run llm:login` once.
+Open <http://localhost:3000> and configure `.env.local` with server-side values:
 
-- One run from the terminal, with a trace: `npm run live scripts/crashtest.ts -- london` (also `tokyo`, `sao-paulo`).
-- Checks: `npm test`, `npm run typecheck`, `npm run lint`. Tests use a synthetic Qloo world and need no keys.
-- Evaluation: `npm run live eval/run.ts`, then `npm run live eval/report.ts`.
-- Failure-directed evaluation: `npm run eval:failures -- <scenario-tag>` reads an existing run without model or Qloo calls and prints the smallest representative rerun set covering its observed failure patterns. Stable improving cases are skipped.
+```text
+QLOO_API_KEY=
+QLOO_BASE_URL=https://hackathon.api.qloo.com
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-6-luna
+LLM_REASONING_EFFORT=low
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com/v1
+BRAVE_SEARCH_API_KEY=
+BRAVE_SEARCH_BASE_URL=https://api.search.brave.com/res/v1/web/search
+RECOMMENDATION_ARCHITECTURE=parallel
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+```
 
-## Supported cities
+Never expose credentials through `NEXT_PUBLIC_*`. The Vercel Upstash Marketplace integration's `KV_REST_API_URL` and `KV_REST_API_TOKEN` names are also supported automatically.
 
-New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydney, Paris and Berlin. These are the cities where we measured Qloo's artist, brand and place data as deep and city-specific enough for Cultural Crash Test ([`data/coverage.json`](data/coverage.json)). New York uses London as its direction contrast so it is never compared with itself.
+## Validation
+
+```bash
+npm test
+npm run typecheck
+npm run lint
+npm run build
+```
+
+Release audit on 25 October 2026: **44 test files and 468 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
 
 ## Honest limits
 
-- **Scores are this app's own.** They are built from Qloo affinity ranks. They aren't probabilities, sales forecasts or guarantees of campaign performance.
-- **Qloo's evidence is aggregate cultural affinity.** The app doesn't identify, profile or predict any individual.
-- **Missing data stays missing.**
-  - A name Qloo doesn't know is reported as such.
-  - A Qloo error becomes an error entry in the ledger.
-  - When no local candidate exists, the agent says so and explains why (for example, "of the top 40 for this audience, 38 from another country").
-  - Search excerpts can support a bounded operational gate but never prove live availability, price or willingness.
-- **Recorded runs are labelled.** The demo replays recorded runs of the example briefs so it's fast and free, and labels them as recorded with their date. "Run it live again" fetches fresh data.
-- **Raw Qloo responses are never committed** (Qloo's terms). The test fixtures are synthetic.
+- Qloo affinity is aggregate cultural evidence, not a forecast of sales, attendance, conversion or campaign success.
+- A culturally strong venue can still require direct confirmation of availability, price, capacity and production conditions.
+- Search excerpts are treated as untrusted evidence; only a concrete fact supported by an official venue or owner source can veto a finalist.
+- Unknown entities and missing evidence are shown as unknown and may require a person.
+- The historical evaluation in [`docs/EVALUATION.md`](docs/EVALUATION.md) documents the earlier evaluation line and its limitations; it is not presented as a new aggregate benchmark for the current parallel release.
 
-## Repository
+## Repository map
 
-- [`docs/FINAL_SUBMISSION_RUNBOOK.md`](docs/FINAL_SUBMISSION_RUNBOOK.md): deadline-aware, step-by-step release, deployment, Devpost, judging-period and finalist-preparation checklist for the Qloo Agentic Hackathon 2026.
-- [`docs/PROJECT_ARCHITECTURE_LEARNING_COURSE.md`](docs/PROJECT_ARCHITECTURE_LEARNING_COURSE.md): progressive course covering the product, agent architecture, Qloo evidence flow, decision policy, runtime, UI, function map, code-reading labs and judge questions.
-- `src/lib/crashtest/`:
-  - types and schemas;
-  - evidence ledger and budget guard;
-  - evidence gathering, evaluator, planner and repair;
-  - the controller (`run.ts`) and report.
-- `src/lib/qloo/`: typed Qloo client (search, entities, tags, insights including tag results and explainability), with retries, concurrency limits and a server-side cache.
-- `src/lib/operational/`: optional bounded venue search, official-source evidence reading and deterministic feasibility gate.
-- `src/lib/engine/`, `src/lib/agent/check.ts`: the locality gates and role tags, reused from the earlier Transcreate prototype (tag `transcreate-final`).
-- `src/app/api/crashtest/`: server-sent-events endpoint. It is rate-limited, and the Qloo key stays on the server.
-- `src/components/`: brief form, agent console and results.
-- `eval/`, `research/`, `docs/`: evaluation, API probes (scripts only) and decisions.
+- `src/lib/intake/` — conversational brief extraction and validation.
+- `src/lib/crashtest/` — independent tracks, evidence matrix, agent search, adjudication, stress tests and reports.
+- `src/lib/qloo/` — typed Qloo client, caching and normalization.
+- `src/lib/operational/` — bounded Brave retrieval, official-source reading and deterministic venue gate.
+- `src/components/` — chat, comparison, plain-language explanation and decision graph.
+- `tests/` — synthetic unit, component, server and decision-policy coverage.
+- `docs/SUBMISSION.md` — release-accurate Devpost copy and testing instructions.
+- `docs/FINAL_SUBMISSION_RUNBOOK.md` — deadline and submission checklist.
 
-## License
-
-[MIT](LICENSE)
+Raw Qloo responses, credentials and evaluation outputs containing restricted data are deliberately excluded from Git.

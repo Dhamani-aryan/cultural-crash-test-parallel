@@ -1,7 +1,10 @@
-# Cultural Crash-Test: product and build plan
+# Cultural Crash-Test: archived product and build plan
+
+> Historical 21 October plan for the earlier sequential build. The live release is documented in
+> [`../README.md`](../README.md), [`../STATUS.md`](../STATUS.md) and [`SUBMISSION.md`](SUBMISSION.md).
 
 **Status:** plan, 2026-10-21. Pivot from Transcreate (tagged `transcreate-final`; its plan and evaluation live at that tag).
-**Deadline:** Oct 30, 11:45 PM ET. **Repo:** github.com/Dhamani-aryan/cultural-crash-test (MIT).
+**Deadline:** Oct 30, 11:45 PM ET. **Current repo:** github.com/Dhamani-aryan/cultural-crash-test-parallel (MIT).
 **Spec:** `CULTURAL_CRASH_TEST_PROJECT_SPEC.md` (supplied by the owner). This file is how we build it.
 
 ---

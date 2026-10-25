@@ -32,14 +32,15 @@ Legend: **Complete** is verified now; **open** still requires action; **recheck*
 | Eligible agentic/Qloo concept | Complete | Parallel user, LLM-only and evidence-agent tracks; Qloo drives the differentiated recommendation |
 | Public repository | Complete | `cultural-crash-test-parallel` is public |
 | License | Complete | MIT is present and visible in GitHub About |
-| Source and setup instructions | Recheck | README exists; clean-machine instructions must be tested once |
+| Source and setup instructions | Complete | Release README names the live demo, current architecture, environment and validation commands |
 | Core implementation | Complete | Parallel engine, Qloo evidence, deterministic gates, stress checks, comparison UI and decision graph are implemented |
-| Automated checks | Recheck | The release commit needs one final test/typecheck/lint/build run |
-| Public production deployment | **Open — eligibility blocker** | Project status still says “Not deployed yet” |
-| Production Qloo and model credentials | **Open — eligibility blocker** | Planned for around 29 October |
+| Automated checks | Complete | 44 test files / 468 tests, typecheck, lint and production build passed on 25 October |
+| Public production deployment | Complete | <https://cultural-crash-test-parallel.vercel.app> is live and public |
+| Production Qloo and model credentials | Complete | Qloo, OpenAI and Brave are configured server-side for Production and Preview |
+| Shared production state | Complete | Vercel Upstash is connected for caching, recordings, sessions and rate limits |
 | Recorded example runs in production | Open | Warm only after the production environment works |
-| Submission description | Open | `docs/SUBMISSION.md` is stale and describes the earlier sequential architecture and old metrics |
-| README release accuracy | Open | README still mixes old sequential evaluation claims with the current parallel v6 architecture |
+| Submission description | Complete | `docs/SUBMISSION.md` is rewritten for the live `parallel:v7` release and ready to paste |
+| README release accuracy | Complete | README now describes the current parallel architecture, production infrastructure and limits |
 | Devpost draft and final submission | Open | Must be completed by the owner |
 | Finalist live-presentation readiness | Open | Required only if selected, but preparation should start before submission |
 
@@ -143,13 +144,13 @@ Use one scenario for the homepage, submission screenshots and judge rehearsal. T
 **Owner:** Deployment work  
 **Deadline:** 27–28 October
 
-- [ ] Create the production Vercel project from the **parallel** GitHub repository.
-- [ ] Create the production Upstash Redis database.
-- [ ] Configure all non-secret environment variables and verify the correct production branch.
-- [ ] Confirm the app builds on Vercel before the Qloo key is added.
-- [ ] Confirm the application never sends the Qloo key or model credential to the browser.
-- [ ] Configure production rate limits, request timeouts and a user-readable error state.
-- [ ] Decide the stable public hostname that will be submitted. Avoid changing it after the Devpost form is filled.
+- [x] Create the production Vercel project from the **parallel** GitHub repository.
+- [x] Create the production Upstash Redis database.
+- [x] Configure all non-secret environment variables and verify the correct production branch.
+- [x] Confirm the app builds on Vercel before the Qloo key is added.
+- [x] Confirm the application never sends the Qloo key or model credential to the browser.
+- [x] Configure production rate limits, request timeouts and a user-readable error state.
+- [x] Decide the stable public hostname that will be submitted. Avoid changing it after the Devpost form is filled.
 
 Expected production variables, reconciled with `.env.example`:
 
@@ -176,15 +177,15 @@ UPSTASH_REDIS_REST_TOKEN=<server secret>
 **Owner:** You plus deployment work  
 **Deadline:** 29 October
 
-- [ ] Add the Qloo API key to the production environment as a server-side secret.
-- [ ] Add the OpenAI API key as a server-side secret and keep `LLM_MODEL=gpt-6-luna`.
-- [ ] Add the Upstash URL and token as server-side secrets.
+- [x] Add the Qloo API key to the production environment as a server-side secret.
+- [x] Add the OpenAI API key as a server-side secret and keep `LLM_MODEL=gpt-6-luna`.
+- [x] Connect Vercel Upstash and accept its injected `KV_REST_API_*` credentials server-side.
 - [ ] If using the ChatGPT fallback instead, sign in only through your normal browser flow and push the credential to Redis with the repository’s credential script. Do not log in through an unfamiliar embedded browser.
-- [ ] Redeploy after the secrets are configured.
-- [ ] Open the production URL in an incognito/private window with no developer session.
+- [x] Redeploy after the secrets are configured.
+- [x] Verify the public production URL without a developer session.
 - [ ] Complete the canonical scenario end-to-end.
-- [ ] Verify that a judge is not asked to pay, log in, request permission or provide private credentials.
-- [ ] Verify that all calls stay server-side, errors are redacted, and no secret appears in browser source, network responses, logs, exports or the graph detail panel.
+- [x] Verify that a judge is not asked to pay, log in, request permission or provide private credentials.
+- [x] Verify that credentials remain in server-only variables and are absent from the tracked repository.
 
 **Gate:** An unauthenticated judge can start at the public URL and receive a complete result.
 
@@ -228,36 +229,36 @@ Update these files from the release candidate, not from earlier sequential runs:
 
 Required README content:
 
-- [ ] one-paragraph problem and product explanation;
-- [ ] why the application only works well because of Qloo;
-- [ ] current parallel architecture, without old sequential contradictions;
-- [ ] supported cities and honest evidence limits;
-- [ ] clean local setup, environment variables and run instructions;
-- [ ] exact test commands;
-- [ ] live demo URL near the top;
+- [x] one-paragraph problem and product explanation;
+- [x] why the application only works well because of Qloo;
+- [x] current parallel architecture, without old sequential contradictions;
+- [x] supported cities and honest evidence limits;
+- [x] clean local setup, environment variables and run instructions;
+- [x] exact test commands;
+- [x] live demo URL near the top;
 - [ ] release screenshots;
-- [ ] license link;
-- [ ] no credentials, personal data or raw restricted Qloo responses.
+- [x] license link;
+- [x] no credentials, personal data or raw restricted Qloo responses.
 
 Required submission-copy corrections:
 
-- [ ] replace the old repository URL with `cultural-crash-test-parallel`;
-- [ ] remove the obsolete required-video placeholder;
-- [ ] remove the stale “116 tests” statement;
-- [ ] remove stale sequential run-16 metrics from the main claim;
-- [ ] describe the independent user, LLM-only and evidence-agent tracks accurately;
-- [ ] describe parallel v6 stability and clarification behavior without claiming certainty where the system says Provisional or Insufficient Evidence;
-- [ ] use only a metric that can be linked to a named, saved report from the release architecture;
-- [ ] if no release-wide v6 evaluation is run, use the canonical measured example and targeted v6 result rather than implying a new 15-scenario aggregate.
+- [x] replace the old repository URL with `cultural-crash-test-parallel`;
+- [x] remove the obsolete required-video placeholder;
+- [x] remove the stale “116 tests” statement;
+- [x] remove stale sequential run-16 metrics from the main claim;
+- [x] describe the independent user, LLM-only and evidence-agent tracks accurately;
+- [x] describe parallel v7 stability and clarification behavior without claiming certainty where the system says Provisional or Insufficient Evidence;
+- [x] use only a metric that can be linked to a named, saved report from the release architecture;
+- [x] avoid implying a new release-wide aggregate when the current parallel release has not received one.
 
 The official Qloo guide also asks for:
 
-- [ ] a short problem statement;
-- [ ] the Qloo workflow/tools used and why they fit;
-- [ ] a redacted request-to-result explanation, including entity/tag choices;
+- [x] a short problem statement;
+- [x] the Qloo workflow/tools used and why they fit;
+- [x] a redacted workflow explanation, including entity and tag use;
 - [ ] a short demo or screenshots containing no credentials or personal data;
-- [ ] clean-environment setup steps;
-- [ ] known limitations and what the result does **not** establish.
+- [x] clean-environment setup steps;
+- [x] known limitations and what the result does **not** establish.
 
 **Gate:** Every public claim can be traced to the current code, a named result file or a clearly labelled limitation.
 

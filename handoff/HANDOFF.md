@@ -1,9 +1,13 @@
-# Cultural Crash-Test: handoff for a new chat
+# Cultural Crash-Test: archived handoff (21 October 2026)
+
+> Historical implementation snapshot. It describes the earlier sequential repository and is not
+> the current release guide. Use [`../STATUS.md`](../STATUS.md), [`../README.md`](../README.md) and
+> [`NEW_CHAT_HANDOFF_2026-10-25.md`](NEW_CHAT_HANDOFF_2026-10-25.md) for the live parallel release.
 
 > **Read this whole file before doing anything.** It explains the product, how the code works, where things stand, the rules the owner works by, and what is left. **Part 2** is the owner's original project spec, verbatim.
 >
 > **Snapshot:** 2026-10-21. **Hackathon deadline:** Oct 30, 11:45 PM ET (Qloo Agentic Hackathon).
-> **Repo:** https://github.com/Dhamani-aryan/cultural-crash-test (public, MIT, branch `main`). **Local folder:** `G:\Qloo 2.0` (Windows; the folder keeps its old name on purpose).
+> **Historical repo:** `Dhamani-aryan/cultural-crash-test`. **Current repo:** https://github.com/Dhamani-aryan/cultural-crash-test-parallel.
 
 ---
 
