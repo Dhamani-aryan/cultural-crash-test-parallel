@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   parallelView,
   toParallelMarkdown,
@@ -512,6 +512,19 @@ export function ParallelRunResult({ state }: { state: RunState }) {
   const [showDetails, setShowDetails] = useState(false);
   const [focus, setFocus] = useState<Slot | null>(null);
   const [step, setStep] = useState<number | null>(null);
+  const detailsRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!showDetails) return;
+    const frame = requestAnimationFrame(() => {
+      detailsRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showDetails]);
+
   const view = parallelView(state);
   const p = state.parallel;
   if (!view || !p)
@@ -601,9 +614,10 @@ export function ParallelRunResult({ state }: { state: RunState }) {
 
       {showDetails && (
         <section
+          ref={detailsRef}
           id="decision-details-panel"
           aria-label="Decision details"
-          className="space-y-7 border-t border-line pt-7"
+          className="scroll-mt-6 space-y-7 border-t border-line pt-7"
         >
           <p className={`max-w-2xl text-[15px] leading-6 ${s.stable ? "text-ink-2" : "text-weak"}`}>
             {s.stability}
