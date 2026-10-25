@@ -32,8 +32,7 @@ const qlooSchema = z.object({
 const llmSchema = z
   .object({
   LLM_PROVIDER: z.enum(["chatgpt", "openai"], { error: "LLM_PROVIDER must be: chatgpt or openai" }).default("chatgpt"),
-  // gpt-6-luna matched gpt-5.6-sol on every independent eval measure and runs ~36% faster
-  // (docs/MODEL-COMPARISON.md).
+  // Default selected from internal quality and latency evaluation.
   LLM_MODEL: z.string().trim().min(1).default("gpt-6-luna"),
   LLM_REASONING_EFFORT: z.enum(["minimal", "low", "medium", "high"]).default("low"),
   CHATGPT_AUTH_FILE: z.string().trim().min(1).default(".secrets/chatgpt-auth.json"),

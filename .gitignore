@@ -30,3 +30,20 @@ eval/out/
 
 # local tool config
 .claude/
+
+# private project working material (kept locally, never published)
+AGENTS.md
+CLAUDE.md
+STATUS.md
+docs/
+handoff/
+eval/
+research/
+scripts/
+tests/eval/
+tests/clarify/fixtures.test.ts
+tests/clarify/gate.test.ts
+tests/clarify/p21-regression.test.ts
+tests/crashtest/agent-v3.test.ts
+tests/crashtest/intent.test.ts
+tests/crashtest/parallel.test.ts

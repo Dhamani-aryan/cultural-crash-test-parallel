@@ -1,6 +1,6 @@
 {
   "measuredAt": "2026-10-20",
-  "method": "scripts/measure-coverage.ts",
+  "method": "internal coverage measurement",
   "cities": {
     "New York City": {
       "artist": {

@@ -2,8 +2,8 @@ import coverage from "../../data/coverage.json";
 
 /**
  * The markets Transcreate supports. We launch only where Qloo's taste data is deep and
- * city-specific enough to trust (measured by scripts/measure-coverage.ts, stored in
- * data/coverage.json). Each domain gets a confidence grade; references in an "off" domain
+ * city-specific enough to trust (measured and stored in data/coverage.json). Each domain
+ * gets a confidence grade; references in an "off" domain
  * are flagged for a human instead of translated.
  */
 
@@ -198,8 +198,7 @@ export function gradeFromCoverage(domain: Domain, c: CityCoverage | undefined): 
 }
 
 /**
- * Overrides where measured translation quality disagrees with raw coverage. Each one is
- * recorded in docs/DECISIONS.md with the evidence.
+ * Overrides where measured translation quality disagrees with raw coverage.
  */
 const OVERRIDES: Partial<Record<string, Partial<Record<Domain, Confidence>>>> = {};
 

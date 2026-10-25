@@ -16,7 +16,7 @@ import type {
 /**
  * Lenient normalizers for raw Qloo JSON. The docs describe the shapes only loosely, so
  * every field is optional here and missing values become `null` rather than errors.
- * Shapes were confirmed against the live hackathon API (see research/).
+ * Shapes were confirmed against the live hackathon API.
  */
 
 type Obj = Record<string, unknown>;

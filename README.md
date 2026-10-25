@@ -118,7 +118,7 @@ npm run lint
 npm run build
 ```
 
-Release audit on 25 October 2026: **44 test files and 468 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
+Public release audit on 25 October 2026: **35 test files and 309 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
 
 ## Honest limits
 
@@ -126,7 +126,6 @@ Release audit on 25 October 2026: **44 test files and 468 tests passed**, follow
 - A culturally strong venue can still require direct confirmation of availability, price, capacity and production conditions.
 - Search excerpts are treated as untrusted evidence; only a concrete fact supported by an official venue or owner source can veto a finalist.
 - Unknown entities and missing evidence are shown as unknown and may require a person.
-- The historical evaluation in [`docs/EVALUATION.md`](docs/EVALUATION.md) documents the earlier evaluation line and its limitations; it is not presented as a new aggregate benchmark for the current parallel release.
 
 ## Repository map
 
@@ -136,7 +135,5 @@ Release audit on 25 October 2026: **44 test files and 468 tests passed**, follow
 - `src/lib/operational/` — bounded Brave retrieval, official-source reading and deterministic venue gate.
 - `src/components/` — chat, comparison, plain-language explanation and decision graph.
 - `tests/` — synthetic unit, component, server and decision-policy coverage.
-- `docs/SUBMISSION.md` — release-accurate Devpost copy and testing instructions.
-- `docs/FINAL_SUBMISSION_RUNBOOK.md` — deadline and submission checklist.
 
-Raw Qloo responses, credentials and evaluation outputs containing restricted data are deliberately excluded from Git.
+Raw Qloo responses, credentials, internal handoffs, research probes, scenario harnesses and submission working notes are deliberately excluded from Git.
