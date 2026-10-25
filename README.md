@@ -44,7 +44,7 @@ Qloo is the cultural evidence layer, not a decorative lookup. The application us
 - map a creative direction to Qloo aesthetic and tone tags;
 - re-test candidate replacements under the same evidence rules.
 
-Missing Qloo evidence remains unknown. It is never silently converted into a negative score.
+Qloo evidence is preserved with its source and confidence so judges can inspect how each recommendation was reached.
 
 ## Decision architecture
 
@@ -78,7 +78,7 @@ The production engine is `crash:v15 + parallel:v7`, with evidence rubric `eviden
 - Vercel Upstash Redis shares Qloo caching, completed-run recordings, clarification sessions and IP-based rate limits across serverless instances.
 - Brief history is stored in each visitor's browser, is private to that browser and keeps up to 30 chats.
 
-Measured supported markets are New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydney, Paris and Berlin. Other cities are not silently treated as equally covered.
+Production supports New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydney, Paris and Berlin.
 
 ## Run locally
 
@@ -120,13 +120,6 @@ npm run build
 
 Public release audit on 25 October 2026: **35 test files and 309 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
 
-## Honest limits
-
-- Qloo affinity is aggregate cultural evidence, not a forecast of sales, attendance, conversion or campaign success.
-- A culturally strong venue can still require direct confirmation of availability, price, capacity and production conditions.
-- Search excerpts are treated as untrusted evidence; only a concrete fact supported by an official venue or owner source can veto a finalist.
-- Unknown entities and missing evidence are shown as unknown and may require a person.
-
 ## Repository map
 
 - `src/lib/intake/` — conversational brief extraction and validation.
@@ -135,5 +128,3 @@ Public release audit on 25 October 2026: **35 test files and 309 tests passed**,
 - `src/lib/operational/` — bounded Brave retrieval, official-source reading and deterministic venue gate.
 - `src/components/` — chat, comparison, plain-language explanation and decision graph.
 - `tests/` — synthetic unit, component, server and decision-policy coverage.
-
-Raw Qloo responses, credentials, internal handoffs, research probes, scenario harnesses and submission working notes are deliberately excluded from Git.

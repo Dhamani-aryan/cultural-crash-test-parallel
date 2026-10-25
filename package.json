@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Translate cultural references, not just words, using Qloo's taste graph.",
+  "description": "Evidence-grounded cultural launch planning powered by Qloo.",
   "license": "MIT",
   "scripts": {
     "dev": "next dev",
@@ -18,7 +18,7 @@
   "dependencies": {
     "@react-three/drei": "10.7.9",
     "@react-three/fiber": "9.8.1",
-    "next": "16.3.8",
+    "next": "16.4.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
@@ -32,10 +32,9 @@
     "@types/react-dom": "^19",
     "@types/three": "0.186.0",
     "eslint": "^9",
-    "eslint-config-next": "16.3.8",
+    "eslint-config-next": "16.4.3",
     "prettier": "^3.9.9",
     "tailwindcss": "^4",
-    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.0.3"
   }

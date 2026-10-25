@@ -47,3 +47,4 @@ tests/clarify/p21-regression.test.ts
 tests/crashtest/agent-v3.test.ts
 tests/crashtest/intent.test.ts
 tests/crashtest/parallel.test.ts
+src/lib/crashtest/examples.ts

@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Private local research and evaluation tooling is excluded from the public repository.
+    "eval/**",
+    "research/**",
+    "scripts/**",
   ]),
 ]);
 
