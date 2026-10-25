@@ -39,7 +39,11 @@ Cite the claim IDs that decide your verdict and the strongest claims against the
 
 const judgeSchema = z.object({
   verdict: z.enum(["winner", "tie", "insufficient_evidence"]),
-  winner: z.string().nullable().optional().describe("the winning plan's ID, copied exactly; null unless verdict is winner"),
+  winner: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("the winning plan's ID, copied exactly; null unless verdict is winner"),
   decisive: z.array(z.string()).describe("claim IDs that decide the verdict, copied exactly"),
   counter: z.array(z.string()).describe("claim IDs that count against the winner, copied exactly"),
   dimensionWinners: z
@@ -71,7 +75,13 @@ export const COMMERCIAL_CLAIM =
 export function stripCommercialClaims(text: string): { text: string; removed: string[] } {
   const sentences = text.split(/(?<=[.!?])\s+/);
   const removed = sentences.filter((s) => COMMERCIAL_CLAIM.test(s));
-  return { text: sentences.filter((s) => !COMMERCIAL_CLAIM.test(s)).join(" ").trim(), removed };
+  return {
+    text: sentences
+      .filter((s) => !COMMERCIAL_CLAIM.test(s))
+      .join(" ")
+      .trim(),
+    removed,
+  };
 }
 
 /** A neutral brief for the judge: the confirmed brief, without who-wrote-what labels. */
@@ -84,7 +94,9 @@ function judgeBrief(brief: LaunchBrief, market: Market): string {
     `Audience: ${brief.audienceDescription}`,
     brief.brandAttributes.length ? `Brand attributes: ${brief.brandAttributes.join(", ")}` : "",
     ...brief.existingChoices.map((c) => `Named in the brief (${SLOT_LABEL[c.slot]}): ${c.name}`),
-    ...brief.constraints.map((c) => `${c.kind === "hard" ? "Hard" : "Soft"} rule: ${c.description}`),
+    ...brief.constraints.map(
+      (c) => `${c.kind === "hard" ? "Hard" : "Soft"} rule: ${c.description}`,
+    ),
   ]
     .filter(Boolean)
     .join("\n");
@@ -99,21 +111,36 @@ export function rotatedOrders(ids: string[]): string[][] {
 const TRACK_PRIORITY: PlanTrack[] = ["user", "llm", "agent", "hybrid"];
 const signature = (c: CandidatePlan) =>
   [...c.plan.components]
-    .map((x) => `${x.slot}=${x.entity?.id ?? x.label.toLowerCase()}|${x.tags.map((t) => t.id).sort().join(",")}`)
+    .map(
+      (x) =>
+        `${x.slot}=${x.entity?.id ?? x.label.toLowerCase()}|${x.tags
+          .map((t) => t.id)
+          .sort()
+          .join(",")}`,
+    )
     .sort()
-    .join(";") + `#open:${c.open.map((o) => o.slot).sort().join(",")}`;
+    .join(";") +
+  `#open:${c.open
+    .map((o) => o.slot)
+    .sort()
+    .join(",")}`;
 
 /**
  * Plans with exactly the same choices are one plan. It keeps the identity of the track that
  * owns it most directly: the user's own plan first, then the LLM's, the agent's, a hybrid's.
  */
-export function mergeIdentical(candidates: CandidatePlan[]): { kept: CandidatePlan[]; merged: Record<string, string> } {
+export function mergeIdentical(candidates: CandidatePlan[]): {
+  kept: CandidatePlan[];
+  merged: Record<string, string>;
+} {
   const bySig = new Map<string, CandidatePlan[]>();
   for (const c of candidates) bySig.set(signature(c), [...(bySig.get(signature(c)) ?? []), c]);
   const kept: CandidatePlan[] = [];
   const merged: Record<string, string> = {};
   for (const group of bySig.values()) {
-    const [keep, ...rest] = [...group].sort((a, b) => TRACK_PRIORITY.indexOf(a.track) - TRACK_PRIORITY.indexOf(b.track));
+    const [keep, ...rest] = [...group].sort(
+      (a, b) => TRACK_PRIORITY.indexOf(a.track) - TRACK_PRIORITY.indexOf(b.track),
+    );
     kept.push(keep);
     for (const r of rest) merged[r.candidateId] = keep.candidateId;
   }
@@ -131,7 +158,12 @@ export interface AdjudicateInput {
 }
 
 /** The judge's prompt for one order, and how its aliases map back to claim IDs. */
-export function judgePrompt(order: CandidatePlan[], matrix: EvidenceMatrix, brief: LaunchBrief, market: Market) {
+export function judgePrompt(
+  order: CandidatePlan[],
+  matrix: EvidenceMatrix,
+  brief: LaunchBrief,
+  market: Market,
+) {
   const alias = new Map<string, EvidenceClaim>();
   const blocks = order.map((c) => {
     const claims = claimsOf(matrix, c.candidateId);
@@ -158,9 +190,16 @@ async function judgeOnce(input: AdjudicateInput, order: CandidatePlan[]): Promis
   const problems: string[] = [];
   let data: z.infer<typeof judgeSchema> | null = null;
   try {
-    ({ data } = await generateStructured(input.llm, { schema: judgeSchema, system: JUDGE_SYSTEM, prompt, label: `adjudicate:${input.stage}` }));
+    ({ data } = await generateStructured(input.llm, {
+      schema: judgeSchema,
+      system: JUDGE_SYSTEM,
+      prompt,
+      label: `adjudicate:${input.stage}`,
+    }));
   } catch (err) {
-    problems.push(`The judge's answer couldn't be read: ${err instanceof Error ? err.message : String(err)}`);
+    problems.push(
+      `The judge's answer couldn't be read: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   const resolve = (ids: string[], what: string) =>
     ids.flatMap((a) => {
@@ -174,7 +213,11 @@ async function judgeOnce(input: AdjudicateInput, order: CandidatePlan[]): Promis
   if (data?.verdict === "winner") {
     winner = data.winner ? (blind.get(data.winner.trim()) ?? null) : null;
     if (!winner) problems.push(`The winner "${data.winner ?? ""}" isn't one of the plans shown.`);
-    else if (!decisive.some((id) => input.matrix.claims.find((c) => c.claimId === id)?.candidateId === winner))
+    else if (
+      !decisive.some(
+        (id) => input.matrix.claims.find((c) => c.claimId === id)?.candidateId === winner,
+      )
+    )
       problems.push("No decisive claim belongs to the winner.");
   }
   const dimensionWinners: BlindJudgment["dimensionWinners"] = {};
@@ -210,10 +253,18 @@ async function judgeOnce(input: AdjudicateInput, order: CandidatePlan[]): Promis
 export async function adjudicate(input: AdjudicateInput): Promise<AdjudicationResult> {
   const { matrix } = input;
   const ids = input.candidates.map((c) => c.candidateId);
-  const eliminated = Object.fromEntries(ids.filter((id) => matrix.hardFailures[id]?.length).map((id) => [id, matrix.hardFailures[id]]));
+  const eliminated = Object.fromEntries(
+    ids.filter((id) => matrix.hardFailures[id]?.length).map((id) => [id, matrix.hardFailures[id]]),
+  );
   const passing = input.candidates.filter((c) => !eliminated[c.candidateId]);
   const { kept, merged } = mergeIdentical(passing);
-  const order = [...evidenceOrder(matrix, kept.map((c) => c.candidateId)), ...ids.filter((id) => !kept.some((k) => k.candidateId === id))];
+  const order = [
+    ...evidenceOrder(
+      matrix,
+      kept.map((c) => c.candidateId),
+    ),
+    ...ids.filter((id) => !kept.some((k) => k.candidateId === id)),
+  ];
   const base: AdjudicationResult = {
     stage: input.stage,
     candidateIds: ids,
@@ -229,17 +280,24 @@ export async function adjudicate(input: AdjudicateInput): Promise<AdjudicationRe
     flagged: [],
     evidenceOrder: order,
   };
-  if (!kept.length) return { ...base, rationale: "Every plan breaks a hard rule of the brief, so none can be recommended." };
+  if (!kept.length)
+    return {
+      ...base,
+      rationale: "Every plan breaks a hard rule of the brief, so none can be recommended.",
+    };
   if (kept.length === 1) {
     const only = kept[0].candidateId;
     return {
       ...base,
       verdict: "winner",
       winnerCandidateId: only,
-      rationale: Object.keys(eliminated).length || Object.keys(merged).length
-        ? "Only one distinct plan passes the brief's hard rules."
-        : "Only one plan was offered.",
-      decisiveClaimIds: claimsOf(matrix, only).filter((c) => c.stance === "supports").map((c) => c.claimId),
+      rationale:
+        Object.keys(eliminated).length || Object.keys(merged).length
+          ? "Only one distinct plan passes the brief's hard rules."
+          : "Only one plan was offered.",
+      decisiveClaimIds: claimsOf(matrix, only)
+        .filter((c) => c.stance === "supports")
+        .map((c) => c.claimId),
     };
   }
   if (kept.every((c) => (matrix.coverageByCandidate[c.candidateId] ?? 0) < MIN_COVERAGE))
@@ -247,12 +305,16 @@ export async function adjudicate(input: AdjudicateInput): Promise<AdjudicationRe
 
   // Blind IDs are random per run, so sorting by them is a random order; the second order rotates it.
   const shown = [...kept].sort((a, b) => a.blindId.localeCompare(b.blindId));
-  const orders = rotatedOrders(shown.map((c) => c.candidateId)).map((o) => o.map((id) => shown.find((c) => c.candidateId === id)!));
-  const results: BlindJudgment[] = [];
-  for (const o of orders) results.push(await judgeOnce(input, o));
+  const orders = rotatedOrders(shown.map((c) => c.candidateId)).map((o) =>
+    o.map((id) => shown.find((c) => c.candidateId === id)!),
+  );
+  // The two order checks read the same frozen evidence and do not depend on one another.
+  // Run them together so position-bias protection costs one model round trip, not two.
+  const results: BlindJudgment[] = await Promise.all(orders.map((o) => judgeOnce(input, o)));
 
   const [a, b] = results;
-  const agree = a.valid && b.valid && a.verdict === b.verdict && a.winnerCandidateId === b.winnerCandidateId;
+  const agree =
+    a.valid && b.valid && a.verdict === b.verdict && a.winnerCandidateId === b.winnerCandidateId;
   const verdict: AdjudicationResult["verdict"] = agree ? a.verdict : "unstable";
   const cleaned = results.map((r) => stripCommercialClaims(r.rationale));
   const dimensionWinners: AdjudicationResult["dimensionWinners"] = {};
@@ -272,7 +334,9 @@ export async function adjudicate(input: AdjudicateInput): Promise<AdjudicationRe
       ? cleaned[0].text
       : `The two orders disagreed (${results.map((r) => (r.valid ? (r.verdict === "winner" ? `winner ${r.winnerCandidateId}` : r.verdict) : "unusable answer")).join(" vs ")}), so position rather than evidence decided at least one of them.`,
     decisiveClaimIds: agree ? [...new Set([...a.decisiveClaimIds, ...b.decisiveClaimIds])] : [],
-    counterevidenceClaimIds: agree ? [...new Set([...a.counterevidenceClaimIds, ...b.counterevidenceClaimIds])] : [],
+    counterevidenceClaimIds: agree
+      ? [...new Set([...a.counterevidenceClaimIds, ...b.counterevidenceClaimIds])]
+      : [],
     orderResults: results,
     flagged: cleaned.flatMap((c) => c.removed),
   };

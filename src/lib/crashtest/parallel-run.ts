@@ -346,18 +346,21 @@ export async function runParallelCrashTest(
       names: anchors.map((a) => a.name),
       source: anchored.source,
     });
-    neighborhood = contract.neighborhoods.length
-      ? await timed("shared", () =>
-          neighborhoodCentroid(ctxFor("shared"), contract!).catch((err) => {
-            if (err instanceof BudgetExceeded) throw err;
-            return null;
-          }),
-        )
-      : null;
-    // The user's named acts and brands get the same namesake protection as any name, once, shared.
-    const countries = await timed("shared", () =>
-      userChoiceCountries(llmFor("shared"), brief, market),
-    );
+    // These shared preparations are independent: one reads Qloo locality data while the other
+    // resolves namesakes with the model. Starting them together removes a serial round trip.
+    const [resolvedNeighborhood, countries] = await Promise.all([
+      contract.neighborhoods.length
+        ? timed("shared", () =>
+            neighborhoodCentroid(ctxFor("shared"), contract!).catch((err) => {
+              if (err instanceof BudgetExceeded) throw err;
+              return null;
+            }),
+          )
+        : Promise.resolve(null),
+      // The user's named acts and brands get the same namesake protection as any name, once, shared.
+      timed("shared", () => userChoiceCountries(llmFor("shared"), brief, market)),
+    ]);
+    neighborhood = resolvedNeighborhood;
 
     stage(
       "tracks",
@@ -542,7 +545,10 @@ export async function runParallelCrashTest(
   if (deps.operational && candidates.length && !state.stopReason) {
     const venues = operationalVenues(candidates, fin);
     if (venues.length) {
-      stage("verify", "Checking the original and leading venue against current operational sources");
+      stage(
+        "verify",
+        "Checking the original and leading venue against current operational sources",
+      );
       const started = Date.now();
       try {
         const checked = await deps.operational.verifyVenues({
@@ -767,7 +773,10 @@ function finalVerdict(x: {
     );
   if (x.anchorSource === "model_hypothesis") humanChecks.push(x.anchorNotes[0]);
   const anchorReversals =
-    x.stability?.checks.filter((check) => check.outcome === "reversed" && check.kind === "anchor_dropout" && check.omittedAnchor) ?? [];
+    x.stability?.checks.filter(
+      (check) =>
+        check.outcome === "reversed" && check.kind === "anchor_dropout" && check.omittedAnchor,
+    ) ?? [];
   if (anchorReversals.length) {
     const anchors = anchorReversals.map((check) => check.omittedAnchor!.name);
     humanChecks.push(
@@ -794,8 +803,8 @@ function finalVerdict(x: {
       humanChecks.push(
         operational?.status === "verified_fit"
           ? `Confirm ${comp.label}'s dates, price and willingness; its event-format feasibility was supported by the cited operational source.`
-          : operational?.finding ??
-              `Confirm that ${comp.label} can host the launch: capacity, dates and willingness are not in Qloo.`,
+          : (operational?.finding ??
+              `Confirm that ${comp.label} can host the launch: capacity, dates and willingness are not in Qloo.`),
       );
     }
   }

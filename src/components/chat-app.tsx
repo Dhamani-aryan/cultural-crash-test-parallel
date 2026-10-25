@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { LaunchBriefInput } from "@/lib/crashtest/types";
+import type { EvidenceRecord, LaunchBriefInput } from "@/lib/crashtest/types";
 import { MAX_MESSAGE, type Chip } from "@/lib/intake/types";
 import { intakeFromBrief } from "@/lib/intake/validate";
 import {
@@ -186,12 +186,30 @@ const stageIndex = (stage: string) => {
   return 5;
 };
 
-function RunProgress({ log }: { log: LogEntry[] }) {
+export function RunProgress({ log, evidence }: { log: LogEntry[]; evidence: EvidenceRecord[] }) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const update = () => setElapsedSeconds(Math.floor((Date.now() - started) / 1000));
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const stages = log.filter(
     (entry): entry is Extract<LogEntry, { kind: "stage" }> => entry.kind === "stage",
   );
   const latest = stages.at(-1);
   const active = latest ? stageIndex(latest.stage) : 0;
+  const activity = evidence.slice(-4);
+  const elapsed = `${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
+  const activityLabel: Record<EvidenceRecord["queryKind"], string> = {
+    search: "Searching Qloo",
+    entities: "Reading entity details",
+    tags: "Mapping creative signals",
+    insights: "Testing audience affinity",
+    locality: "Checking local relevance",
+    adjudication: "Comparing plans",
+    review: "Reviewing role fit",
+  };
   return (
     <section
       aria-label="Research progress"
@@ -206,6 +224,9 @@ function RunProgress({ log }: { log: LogEntry[] }) {
         <p className="text-sm font-medium text-ink">
           {latest?.message ?? "Starting the cultural test"}
         </p>
+        <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted">
+          {elapsed} elapsed
+        </span>
       </div>
       <ol className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {PROGRESS.map((item, index) => {
@@ -230,6 +251,56 @@ function RunProgress({ log }: { log: LogEntry[] }) {
           );
         })}
       </ol>
+      <div className="mt-4 overflow-hidden rounded-lg border border-line bg-[#171918] text-[#e7e8e5]">
+        <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/55">
+            Live research activity
+          </p>
+          <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#69d3a0]">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#69d3a0]" />
+            Working
+          </span>
+        </div>
+        <div role="log" aria-live="polite" aria-relevant="additions" className="p-2">
+          {activity.length ? (
+            <ul className="space-y-1">
+              {activity.map((record, index) => {
+                const newest = index === activity.length - 1;
+                return (
+                  <li
+                    key={record.evidenceId}
+                    className={`grid grid-cols-[auto_1fr] gap-x-2 rounded px-2.5 py-2 transition-colors ${newest ? "bg-white/[0.08] ring-1 ring-inset ring-[#6d8dff]/35" : "text-white/60"}`}
+                  >
+                    <span
+                      aria-hidden
+                      className={`mt-1.5 h-1.5 w-1.5 rounded-full ${newest ? "animate-pulse bg-[#6d8dff]" : "bg-white/25"}`}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-mono text-[9px] uppercase tracking-[0.09em] text-[#9eafff]">
+                          {activityLabel[record.queryKind]}
+                        </span>
+                        <span className="font-mono text-[9px] text-white/35">
+                          {record.resultCount
+                            ? `${record.resultCount} result${record.resultCount === 1 ? "" : "s"}`
+                            : record.coverageStatus}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-white/80">
+                        {record.purpose}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="px-2.5 py-3 font-mono text-[10px] leading-5 text-white/50">
+              Preparing the first measurable audience and market checks…
+            </p>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -626,7 +697,7 @@ export function ChatApp() {
                 )}
                 {started && view.phase === "running" && (
                   <div className="flex items-start gap-3">
-                    <RunProgress log={view.log} />
+                    <RunProgress log={view.log} evidence={view.evidence} />
                     <button
                       type="button"
                       onClick={crash.cancel}
