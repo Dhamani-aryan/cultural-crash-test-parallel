@@ -29,8 +29,9 @@ const qlooSchema = z.object({
   QLOO_BASE_URL: z.url().default("https://hackathon.api.qloo.com"),
 });
 
-const llmSchema = z.object({
-  LLM_PROVIDER: z.enum(["chatgpt"], { error: "LLM_PROVIDER must be: chatgpt" }).default("chatgpt"),
+const llmSchema = z
+  .object({
+  LLM_PROVIDER: z.enum(["chatgpt", "openai"], { error: "LLM_PROVIDER must be: chatgpt or openai" }).default("chatgpt"),
   // gpt-6-luna matched gpt-5.6-sol on every independent eval measure and runs ~36% faster
   // (docs/MODEL-COMPARISON.md).
   LLM_MODEL: z.string().trim().min(1).default("gpt-6-luna"),
@@ -38,7 +39,13 @@ const llmSchema = z.object({
   CHATGPT_AUTH_FILE: z.string().trim().min(1).default(".secrets/chatgpt-auth.json"),
   /** "file" for local development, "redis" (Upstash) for deployments. */
   CHATGPT_AUTH_STORE: z.enum(["file", "redis"]).default("file"),
-});
+  OPENAI_API_KEY: z.string().trim().optional(),
+  OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),
+  })
+  .superRefine((value, ctx) => {
+    if (value.LLM_PROVIDER === "openai" && !value.OPENAI_API_KEY)
+      ctx.addIssue({ code: "custom", path: ["OPENAI_API_KEY"], message: "OPENAI_API_KEY is required when LLM_PROVIDER=openai" });
+  });
 
 const redisSchema = z.object({
   UPSTASH_REDIS_REST_URL: z.url({ error: "UPSTASH_REDIS_REST_URL must be a URL" }),
@@ -81,6 +88,8 @@ export function getLlmEnv(env: Env = process.env) {
     reasoningEffort: e.LLM_REASONING_EFFORT,
     chatgptAuthFile: e.CHATGPT_AUTH_FILE,
     chatgptAuthStore: e.CHATGPT_AUTH_STORE,
+    openAiApiKey: e.OPENAI_API_KEY,
+    openAiBaseUrl: e.OPENAI_BASE_URL.replace(/\/+$/, ""),
   };
 }
 

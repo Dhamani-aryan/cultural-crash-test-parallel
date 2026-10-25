@@ -88,14 +88,15 @@ The sample is small and the report states its limits, including the earlier runs
 
 ## Run locally
 
-Requires Node.js 22+, a Qloo hackathon key, and a ChatGPT sign-in for the model (no OpenAI API key; see `.env.example`).
+Requires Node.js 22+, a Qloo hackathon key, and either an OpenAI API key or the optional ChatGPT sign-in fallback (see `.env.example`).
 
 ```bash
 npm ci
-cp .env.example .env.local   # set QLOO_API_KEY; add BRAVE_SEARCH_API_KEY for venue verification
-npm run llm:login            # one-time ChatGPT sign-in, saved to git-ignored .secrets/
+cp .env.example .env.local   # set QLOO_API_KEY and OPENAI_API_KEY; add BRAVE_SEARCH_API_KEY for venue verification
 npm run dev                  # http://localhost:3000
 ```
+
+To use the subscription fallback instead, set `LLM_PROVIDER=chatgpt` and run `npm run llm:login` once.
 
 - One run from the terminal, with a trace: `npm run live scripts/crashtest.ts -- london` (also `tokyo`, `sao-paulo`).
 - Checks: `npm test`, `npm run typecheck`, `npm run lint`. Tests use a synthetic Qloo world and need no keys.

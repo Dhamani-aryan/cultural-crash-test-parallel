@@ -1356,6 +1356,7 @@ npm test
 npm run typecheck
 npm run lint
 npm run build
+# Only when using the optional LLM_PROVIDER=chatgpt fallback:
 npm run llm:login
 ```
 

@@ -156,16 +156,18 @@ Expected production variables, reconciled with `.env.example`:
 ```text
 QLOO_API_KEY=<server secret; add on 29 October>
 QLOO_BASE_URL=https://hackathon.api.qloo.com
-LLM_PROVIDER=chatgpt
-LLM_MODEL=<release model>
-LLM_REASONING_EFFORT=<release setting>
-CHATGPT_AUTH_STORE=redis
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-6-luna
+LLM_REASONING_EFFORT=low
+OPENAI_API_KEY=<server secret>
+OPENAI_BASE_URL=https://api.openai.com/v1
+BRAVE_SEARCH_API_KEY=<optional server secret for venue verification>
 RECOMMENDATION_ARCHITECTURE=parallel
 UPSTASH_REDIS_REST_URL=<server secret>
 UPSTASH_REDIS_REST_TOKEN=<server secret>
 ```
 
-The local `CHATGPT_AUTH_FILE` is for development. Production must use the Redis-backed credential flow already documented by the project. Never paste credentials into source, a screenshot, Devpost text or a client-visible variable.
+`OPENAI_API_KEY` is server-only. The local `CHATGPT_AUTH_FILE` and Redis credential flow are used only when deliberately switching back to `LLM_PROVIDER=chatgpt`. Never paste credentials into source, a screenshot, Devpost text or a client-visible variable.
 
 **Gate:** Vercel builds the correct repository and reaches a safe no-credential/health state before paid or limited credentials are attached.
 
@@ -175,8 +177,9 @@ The local `CHATGPT_AUTH_FILE` is for development. Production must use the Redis-
 **Deadline:** 29 October
 
 - [ ] Add the Qloo API key to the production environment as a server-side secret.
+- [ ] Add the OpenAI API key as a server-side secret and keep `LLM_MODEL=gpt-6-luna`.
 - [ ] Add the Upstash URL and token as server-side secrets.
-- [ ] Sign in to ChatGPT only through your normal browser flow and push the credential to Redis with the repository’s credential script. Do not log in through an unfamiliar embedded browser.
+- [ ] If using the ChatGPT fallback instead, sign in only through your normal browser flow and push the credential to Redis with the repository’s credential script. Do not log in through an unfamiliar embedded browser.
 - [ ] Redeploy after the secrets are configured.
 - [ ] Open the production URL in an incognito/private window with no developer session.
 - [ ] Complete the canonical scenario end-to-end.
