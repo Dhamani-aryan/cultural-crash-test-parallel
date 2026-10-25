@@ -108,6 +108,12 @@ export async function runParallelCrashTest(
         parseCalls++;
         return deps.llm.generateText({ ...r, signal: opts.signal });
       },
+      generateJson: deps.llm.generateJson
+        ? (r) => {
+            parseCalls++;
+            return deps.llm.generateJson!({ ...r, signal: opts.signal });
+          }
+        : undefined,
     };
     ({ brief: briefInput, read } = await parseQuery(counting, req, market));
   } else {
@@ -160,6 +166,13 @@ export async function runParallelCrashTest(
       usage[scope].llmCalls++;
       return deps.llm.generateText({ ...req, signal: opts.signal });
     },
+    generateJson: deps.llm.generateJson
+      ? (req) => {
+          state.llmCalls++;
+          usage[scope].llmCalls++;
+          return deps.llm.generateJson!({ ...req, signal: opts.signal });
+        }
+      : undefined,
   });
   const statsAtStart = deps.qlooStats ? { ...deps.qlooStats } : undefined;
   const counted = budgeted(deps.qloo, state.maxQlooCalls, (used) => {

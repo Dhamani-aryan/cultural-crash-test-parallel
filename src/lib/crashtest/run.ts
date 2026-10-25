@@ -4,12 +4,24 @@ import { marketById } from "@/lib/markets";
 import type { QlooClient } from "@/lib/qloo";
 import type { OperationalResearchClient } from "@/lib/operational/types";
 import { unverifiableRules } from "./constraints";
-import { MATERIAL_DELTA, compareEvaluations, evaluatePlan, judgeRetest, type Progress } from "./evaluate";
+import {
+  MATERIAL_DELTA,
+  compareEvaluations,
+  evaluatePlan,
+  judgeRetest,
+  type Progress,
+} from "./evaluate";
 import { gatherEvidence, type GatherContext } from "./gather";
 import { BudgetExceeded, budgeted, createLedger, memoized } from "./ledger";
 import { buildPlan, draftPlan } from "./plan";
 import { QueryRequestSchema, parseQuery, type QueryRequest } from "./query";
-import { applyRepair, repairDirection, repairEntity, type DraftTrial, type RepairProposal } from "./repair";
+import {
+  applyRepair,
+  repairDirection,
+  repairEntity,
+  type DraftTrial,
+  type RepairProposal,
+} from "./repair";
 import { writeVerdict } from "./report";
 import { runParallelCrashTest } from "./parallel-run";
 import { freezeBrief } from "./tracks";
@@ -53,7 +65,11 @@ export interface RunOptions {
   signal?: AbortSignal;
   runId?: string;
   /** Override the depth's limits (tests, evaluation). */
-  limits?: { maxRepairs?: number; maxQlooCalls?: number; /** Parallel runs: the agent's beam width. */ beamWidth?: number };
+  limits?: {
+    maxRepairs?: number;
+    maxQlooCalls?: number;
+    /** Parallel runs: the agent's beam width. */ beamWidth?: number;
+  };
   /** Recorded in the run's provenance. */
   runVersion?: string;
   /** Candidate retrieval and ranking; defaults to RECOMMENDATION_RANKING, then v1. */
@@ -88,15 +104,21 @@ class Cancelled extends Error {}
  */
 export function attachClarification(state: RunState, c: RunClarification): RunState {
   if (state.clarification) return state;
-  state.clarification = { ...c, fingerprintMatches: freezeBrief(state.brief).fingerprint === c.fingerprint };
+  state.clarification = {
+    ...c,
+    fingerprintMatches: freezeBrief(state.brief).fingerprint === c.fingerprint,
+  };
   for (const a of c.assumptions) {
     const line = `Clarification: ${a}`;
     if (!state.assumptions.includes(line)) state.assumptions.push(line);
   }
-  for (const p of c.provisional) if (!state.unresolvedQuestions.includes(p)) state.unresolvedQuestions.unshift(p);
+  for (const p of c.provisional)
+    if (!state.unresolvedQuestions.includes(p)) state.unresolvedQuestions.unshift(p);
   const v = state.parallel?.verdict;
   // The verdict's own list of assumptions is what the comparison shows; delegated answers belong there too.
-  if (v) for (const a of c.assumptions) if (!v.assumptionsIntroduced.includes(a)) v.assumptionsIntroduced.push(a);
+  if (v)
+    for (const a of c.assumptions)
+      if (!v.assumptionsIntroduced.includes(a)) v.assumptionsIntroduced.push(a);
   if (v && c.provisional.length) {
     // An answer the user delegated, or an identity left unresolved, could change the plan.
     v.provisional = !!v.candidateId;
@@ -114,11 +136,15 @@ export async function runCrashTest(
     // One place attaches the clarification to the finished state, for either architecture.
     const c = opts.clarification;
     const emit = opts.emit;
-    opts = { ...opts, emit: (e) => (e.type === "done" && attachClarification(e.state, c), emit?.(e)) };
+    opts = {
+      ...opts,
+      emit: (e) => (e.type === "done" && attachClarification(e.state, c), emit?.(e)),
+    };
     const state = await runCrashTest(deps, input, { ...opts, clarification: undefined });
     return attachClarification(state, c);
   }
-  if (architectureFrom(opts.architecture) === "parallel") return runParallelCrashTest(deps, input, opts);
+  if (architectureFrom(opts.architecture) === "parallel")
+    return runParallelCrashTest(deps, input, opts);
   const emit = opts.emit ?? (() => {});
   const market = marketById(input.marketId);
   if (!market) throw new Error(`Unsupported city: ${input.marketId}`);
@@ -139,6 +165,12 @@ export async function runCrashTest(
         parseCalls++;
         return deps.llm.generateText({ ...r, signal: opts.signal });
       },
+      generateJson: deps.llm.generateJson
+        ? (r) => {
+            parseCalls++;
+            return deps.llm.generateJson!({ ...r, signal: opts.signal });
+          }
+        : undefined,
     };
     ({ brief: briefInput, read } = await parseQuery(counting, req, market));
   } else {
@@ -179,11 +211,18 @@ export async function runCrashTest(
       state.llmCalls++;
       return deps.llm.generateText({ ...req, signal: opts.signal });
     },
+    generateJson: deps.llm.generateJson
+      ? (req) => {
+          state.llmCalls++;
+          return deps.llm.generateJson!({ ...req, signal: opts.signal });
+        }
+      : undefined,
   };
   const statsAtStart = deps.qlooStats ? { ...deps.qlooStats } : undefined;
   const counted = budgeted(deps.qloo, state.maxQlooCalls, (used) => {
     state.qlooCallsUsed = used;
-    if (used % 10 === 0) emit({ type: "budget", qlooCallsUsed: used, maxQlooCalls: state.maxQlooCalls });
+    if (used % 10 === 0)
+      emit({ type: "budget", qlooCallsUsed: used, maxQlooCalls: state.maxQlooCalls });
   });
   // Repeats inside the run are answered from memory, so they reach neither the budget nor Qloo.
   const memo = memoized(counted.client);
@@ -192,7 +231,12 @@ export async function runCrashTest(
     (record) => emit({ type: "evidence", record }),
   );
   state.evidenceLedger = ledger.records;
-  const ctx: GatherContext = { client: memo.client, ledger, market, ranking: rankingFrom(opts.ranking) };
+  const ctx: GatherContext = {
+    client: memo.client,
+    ledger,
+    market,
+    ranking: rankingFrom(opts.ranking),
+  };
   const stage = (s: string, message: string) => {
     if (opts.signal?.aborted) throw new Cancelled();
     emit({ type: "stage", stage: s, message });
@@ -217,9 +261,16 @@ export async function runCrashTest(
   try {
     stage("validate", `Brief for ${market.label} checked`);
     if (!brief.audienceAnchors.length)
-      state.assumptions.push("No audience anchors were given, so the agent proposed brands or artists that stand for the audience.");
-    const hardText = brief.constraints.filter((c) => c.kind === "hard" && !c.lockSlot && !c.excludeNames?.length);
-    for (const c of hardText) state.assumptions.push(`Hard constraint "${c.description}" isn't machine-checkable; it is shown to the model but not enforced in code.`);
+      state.assumptions.push(
+        "No audience anchors were given, so the agent proposed brands or artists that stand for the audience.",
+      );
+    const hardText = brief.constraints.filter(
+      (c) => c.kind === "hard" && !c.lockSlot && !c.excludeNames?.length,
+    );
+    for (const c of hardText)
+      state.assumptions.push(
+        `Hard constraint "${c.description}" isn't machine-checkable; it is shown to the model but not enforced in code.`,
+      );
 
     let plan: CulturalPlan;
     if (opts.start) {
@@ -227,7 +278,10 @@ export async function runCrashTest(
       plan = opts.start.plan;
       state.assumptions.push(...opts.start.assumptions);
     } else {
-      stage("draft", "Drafting a first plan from the brief, without Qloo (this is also the LLM-only baseline)");
+      stage(
+        "draft",
+        "Drafting a first plan from the brief, without Qloo (this is also the LLM-only baseline)",
+      );
       const draft = await draftPlan(llm, brief, market);
       state.assumptions.push(...draft.assumptions);
 
@@ -240,11 +294,17 @@ export async function runCrashTest(
     state.plan = plan;
     emit({ type: "plan", plan, label: "initial" });
     if (!plan.anchors.length) {
-      stop("insufficient_data", "None of the audience anchors could be found in Qloo, so audience affinity can't be measured.");
+      stop(
+        "insufficient_data",
+        "None of the audience anchors could be found in Qloo, so audience affinity can't be measured.",
+      );
       throw new Cancelled();
     }
 
-    stage("evaluate", "Testing every choice against Qloo: audience affinity, locality and fit with the plan");
+    stage(
+      "evaluate",
+      "Testing every choice against Qloo: audience affinity, locality and fit with the plan",
+    );
     let current = await evaluate(plan);
     state.evaluations.push(current);
     emit({ type: "evaluation", evaluation: current });
@@ -256,30 +316,40 @@ export async function runCrashTest(
     while (true) {
       // Once nothing is contradicted, spare rounds go to upgrading thinly supported choices,
       // weakest first.
-      const repairTarget = current.accepted ? undefined : current.weakest.find((s) => !exhausted.has(s));
+      const repairTarget = current.accepted
+        ? undefined
+        : current.weakest.find((s) => !exhausted.has(s));
       // Spare rounds also go to thin choices when every contradicted choice has been tried and
       // none could be replaced: an unfixable choice shouldn't freeze the rest of the plan.
-      const thin = current.accepted || !repairTarget
-        ? current.components
-            .filter(
-              (c) =>
-                !c.contradicted &&
-                c.status !== "supported" &&
-                // No support for a name from here is Qloo's blind spot for very popular local
-                // names (Sanrio in Tokyo), not a weak choice: it stays.
-                c.status !== "no_support" &&
-                // A wrong namesake in Qloo says nothing about the real choice.
-                state.plan!.components.find((x) => x.slot === c.slot)?.resolution !== "ambiguous" &&
-                !upgradeTried.has(c.slot) &&
-                !state.plan!.components.find((x) => x.slot === c.slot)?.locked &&
-                // The user's own choices are explored only when they switched exploration on.
-                (brief.exploreUserChoices || state.plan!.components.find((x) => x.slot === c.slot)?.origin !== "user_provided") &&
-                // A collaboration brand Qloo doesn't know stays when the brief has a hard rule
-                // code can't verify: no candidate's fit with that rule can be proven either.
-                !(c.slot === "brand_collaboration" && c.status === "unresolved" && unverified.length),
-            )
-            .sort((a, b) => (a.total ?? 0) - (b.total ?? 0))
-        : [];
+      const thin =
+        current.accepted || !repairTarget
+          ? current.components
+              .filter(
+                (c) =>
+                  !c.contradicted &&
+                  c.status !== "supported" &&
+                  // No support for a name from here is Qloo's blind spot for very popular local
+                  // names (Sanrio in Tokyo), not a weak choice: it stays.
+                  c.status !== "no_support" &&
+                  // A wrong namesake in Qloo says nothing about the real choice.
+                  state.plan!.components.find((x) => x.slot === c.slot)?.resolution !==
+                    "ambiguous" &&
+                  !upgradeTried.has(c.slot) &&
+                  !state.plan!.components.find((x) => x.slot === c.slot)?.locked &&
+                  // The user's own choices are explored only when they switched exploration on.
+                  (brief.exploreUserChoices ||
+                    state.plan!.components.find((x) => x.slot === c.slot)?.origin !==
+                      "user_provided") &&
+                  // A collaboration brand Qloo doesn't know stays when the brief has a hard rule
+                  // code can't verify: no candidate's fit with that rule can be proven either.
+                  !(
+                    c.slot === "brand_collaboration" &&
+                    c.status === "unresolved" &&
+                    unverified.length
+                  ),
+              )
+              .sort((a, b) => (a.total ?? 0) - (b.total ?? 0))
+          : [];
       if (current.accepted && (!thin.length || state.currentIteration >= state.maxIterations)) {
         stop("acceptance_criteria_met");
         for (const c of current.components) {
@@ -295,7 +365,11 @@ export async function runCrashTest(
       const target = upgrade ? thin[0].slot : repairTarget;
       if (upgrade) upgradeTried.add(target!);
       if (!target) {
-        const locked = current.components.filter((c) => c.status !== "supported" && state.plan!.components.find((x) => x.slot === c.slot)?.locked);
+        const locked = current.components.filter(
+          (c) =>
+            c.status !== "supported" &&
+            state.plan!.components.find((x) => x.slot === c.slot)?.locked,
+        );
         stop(
           "no_material_improvement",
           locked.length && !current.weakest.length
@@ -312,7 +386,10 @@ export async function runCrashTest(
       const assessment = current.components.find((c) => c.slot === target)!;
       const action = {
         iteration: state.currentIteration,
-        kind: target === "creative_direction" ? ("retest_direction" as const) : ("find_alternatives" as const),
+        kind:
+          target === "creative_direction"
+            ? ("retest_direction" as const)
+            : ("find_alternatives" as const),
         slot: target,
         why: upgrade
           ? `${current.accepted ? "Nothing in the plan is contradicted." : "No candidate could replace the contradicted choices."} ${SLOT_LABEL[target]} "${assessment.label}" has the thinnest support (${assessment.status.replace("_", " ")}): ${assessment.finding} Trying the agent's own suggestions; one is kept only if Qloo rates it Supported.`
@@ -328,7 +405,17 @@ export async function runCrashTest(
       if (target === "creative_direction") {
         const p = await repairDirection({ llm, ctx, brief, plan: before, assessment, upgrade });
         proposals = p ? [p] : [];
-        drafts = p ? [{ slot: target, name: p.after.label, source: "llm_proposal", evidenceIds: p.evidenceIds, briefFit: "unknown" }] : [];
+        drafts = p
+          ? [
+              {
+                slot: target,
+                name: p.after.label,
+                source: "llm_proposal",
+                evidenceIds: p.evidenceIds,
+                briefFit: "unknown",
+              },
+            ]
+          : [];
       } else {
         ({ proposals, trials: drafts } = await repairEntity({
           llm,
@@ -341,17 +428,26 @@ export async function runCrashTest(
           upgrade,
         }));
       }
-      const roundTrials: CandidateTrial[] = drafts.map((t) => ({ ...t, iteration: state.currentIteration }));
+      const roundTrials: CandidateTrial[] = drafts.map((t) => ({
+        ...t,
+        iteration: state.currentIteration,
+      }));
       state.trials!.push(...roundTrials);
       const trialOf = (p: RepairProposal) =>
-        roundTrials.find((t) => (p.after.entity ? t.entityId === p.after.entity.id : t.name === p.after.label && !t.entityId));
+        roundTrials.find((t) =>
+          p.after.entity
+            ? t.entityId === p.after.entity.id
+            : t.name === p.after.label && !t.entityId,
+        );
       if (!proposals.length && upgrade) continue;
       if (!proposals.length) {
         exhausted.add(target);
         const screen = ledger.records.at(-1)?.warnings[0];
         state.unresolvedQuestions.push(
           `${SLOT_LABEL[target]}: Qloo had no candidate that fits this audience, is local to ${market.label} and passes the constraints` +
-            (screen ? ` (${screen.replace(/^No candidate passed the screen: /, "").replace(/\.$/, "")})` : "") +
+            (screen
+              ? ` (${screen.replace(/^No candidate passed the screen: /, "").replace(/\.$/, "")})`
+              : "") +
             ". Worth a human look: keep an international choice, or test a local one by name.",
         );
         continue;
@@ -359,10 +455,18 @@ export async function runCrashTest(
 
       // Re-test candidates in the model's order. The first that makes this choice Supported
       // without costing the plan anything wins; otherwise the best improvement wins.
-      let best: { proposal: RepairProposal; next: PlanEvaluation; progress: Progress; change: PlanChange } | null = null;
+      let best: {
+        proposal: RepairProposal;
+        next: PlanEvaluation;
+        progress: Progress;
+        change: PlanChange;
+      } | null = null;
       const tried: PlanChange[] = [];
       for (const proposal of proposals) {
-        stage("retest", `Re-testing the plan with ${proposal.after.label} as the ${SLOT_LABEL[target].toLowerCase()}`);
+        stage(
+          "retest",
+          `Re-testing the plan with ${proposal.after.label} as the ${SLOT_LABEL[target].toLowerCase()}`,
+        );
         const next = await evaluate(applyRepair(before, proposal), current);
         const now = next.components.find((c) => c.slot === target)!;
         const progress = compareEvaluations(current, next, target);
@@ -375,7 +479,12 @@ export async function runCrashTest(
           before: assessment.label,
           after: proposal.after.label,
           reason: proposal.reason,
-          triggeringEvidenceIds: [...new Set([...assessment.dimensions.flatMap((d) => d.evidenceIds), ...proposal.evidenceIds])],
+          triggeringEvidenceIds: [
+            ...new Set([
+              ...assessment.dimensions.flatMap((d) => d.evidenceIds),
+              ...proposal.evidenceIds,
+            ]),
+          ],
           expectedEffect: proposal.expectedEffect,
           observedEffect:
             `${SLOT_LABEL[target]} ${assessment.total?.toFixed(2) ?? "n/a"} → ${now.total?.toFixed(2) ?? "n/a"} (${now.status.replace("_", " ")}); ` +
@@ -385,13 +494,15 @@ export async function runCrashTest(
         tried.push(change);
         const trial = trialOf(proposal);
         if (trial) trial.retest = retest;
-        if (!rejection && (!best || compareEvaluations(best.next, next, target).better)) best = { proposal, next, progress, change };
+        if (!rejection && (!best || compareEvaluations(best.next, next, target).better))
+          best = { proposal, next, progress, change };
         // The first candidate that passes and makes this choice Supported ends the round.
         if (!rejection && now.status === "supported") break;
       }
       for (const p of proposals) {
         const t = trialOf(p);
-        if (t && !t.retest) t.screenedOutReason = "Not re-tested: an earlier candidate already passed";
+        if (t && !t.retest)
+          t.screenedOutReason = "Not re-tested: an earlier candidate already passed";
       }
       for (const change of tried) {
         if (change !== best?.change) {
@@ -456,12 +567,19 @@ export async function runCrashTest(
     checks: counted.used() + memo.reused(),
     reused: memo.reused(),
     ...(deps.qlooStats && statsAtStart
-      ? { cacheHits: deps.qlooStats.hits - statsAtStart.hits, requests: deps.qlooStats.requests - statsAtStart.requests }
+      ? {
+          cacheHits: deps.qlooStats.hits - statsAtStart.hits,
+          requests: deps.qlooStats.requests - statsAtStart.requests,
+        }
       : {}),
   };
   if (state.evaluations.length && state.stopReason !== "user_cancelled") {
     try {
-      emit({ type: "stage", stage: "report", message: "Writing the verdict from the recorded evidence" });
+      emit({
+        type: "stage",
+        stage: "report",
+        message: "Writing the verdict from the recorded evidence",
+      });
       state.verdict = await writeVerdict(llm, state);
     } catch {
       state.verdict = undefined;

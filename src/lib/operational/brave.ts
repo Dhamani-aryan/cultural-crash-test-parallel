@@ -1,11 +1,7 @@
 import { z } from "zod";
 import { generateStructured } from "@/lib/llm/structured";
 import type { LlmClient } from "@/lib/llm/types";
-import type {
-  OperationalResearchClient,
-  OperationalSource,
-  VenueOperationalCheck,
-} from "./types";
+import type { OperationalResearchClient, OperationalSource, VenueOperationalCheck } from "./types";
 
 const BraveResponse = z.object({
   web: z
@@ -83,12 +79,14 @@ export class BraveOperationalClient implements OperationalResearchClient {
         return { venue, results: parsed.web?.results ?? [] };
       }),
     );
-    const allSources: { venue: string; result: SearchResult }[] = searched.flatMap(({ venue, results }) =>
-      results.map((result) => ({ venue, result })),
+    const allSources: { venue: string; result: SearchResult }[] = searched.flatMap(
+      ({ venue, results }) => results.map((result) => ({ venue, result })),
     );
     if (!allSources.length)
       return {
-        checks: unique.map((venue) => this.unverified(venue, input.city, "No usable operational source was returned.")),
+        checks: unique.map((venue) =>
+          this.unverified(venue, input.city, "No usable operational source was returned."),
+        ),
         modelCalls: 0,
       };
 
@@ -103,6 +101,9 @@ export class BraveOperationalClient implements OperationalResearchClient {
       provider: this.llm.provider,
       model: this.llm.model,
       generateText: (request) => (modelCalls++, this.llm.generateText(request)),
+      generateJson: this.llm.generateJson
+        ? (request) => (modelCalls++, this.llm.generateJson!(request))
+        : undefined,
     };
     const { data } = await generateStructured(counting, {
       schema: Reading,
@@ -116,10 +117,18 @@ export class BraveOperationalClient implements OperationalResearchClient {
     const now = new Date().toISOString();
     const checks = unique.map((venue): VenueOperationalCheck => {
       const reading = data.venues.find((v) => v.venue.toLowerCase() === venue.toLowerCase());
-      if (!reading) return this.unverified(venue, input.city, "The evidence reader returned no finding for this venue.");
+      if (!reading)
+        return this.unverified(
+          venue,
+          input.city,
+          "The evidence reader returned no finding for this venue.",
+        );
       const cited = [...new Set(reading.sourceIndices)]
         .map((i) => ({ i, row: allSources[i] }))
-        .filter((x): x is { i: number; row: (typeof allSources)[number] } => !!x.row && x.row.venue === venue);
+        .filter(
+          (x): x is { i: number; row: (typeof allSources)[number] } =>
+            !!x.row && x.row.venue === venue,
+        );
       const official = new Set(reading.officialSourceIndices);
       const sources: OperationalSource[] = cited.map(({ i, row }) => ({
         title: row.result.title,

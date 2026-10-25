@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { extractJson, generateStructured } from "@/lib/llm/structured";
-import type { LlmClient, LlmRequest } from "@/lib/llm/types";
+import type { LlmClient, LlmJsonRequest, LlmRequest } from "@/lib/llm/types";
 
 function scriptedLlm(...replies: string[]) {
   const requests: LlmRequest[] = [];
@@ -64,5 +64,58 @@ describe("generateStructured", () => {
     await expect(
       generateStructured(llm, { schema: Schema, system: "s", prompt: "p", label: "plan" }),
     ).rejects.toThrow(/plan: model output failed validation twice/);
+  });
+
+  it("uses native strict output and restores optional fields before validation", async () => {
+    const requests: LlmJsonRequest[] = [];
+    const NativeSchema = z.object({
+      title: z.string(),
+      note: z.string().optional(),
+      tags: z.array(z.string()).default([]),
+      nested: z.object({ score: z.number().optional() }),
+    });
+    const llm: LlmClient = {
+      provider: "openai",
+      model: "test",
+      generateText: async () => {
+        throw new Error("text fallback should not run");
+      },
+      generateJson: async (request) => {
+        requests.push(request);
+        return {
+          text: '{"title":"Launch","note":null,"tags":null,"nested":{"score":null}}',
+          usage: null,
+          model: "test",
+          ms: 1,
+        };
+      },
+    };
+    const result = await generateStructured(llm, {
+      schema: NativeSchema,
+      system: "Return a launch.",
+      prompt: "Create it.",
+      label: "launch plan/v1",
+    });
+    expect(result).toMatchObject({
+      data: { title: "Launch", tags: [], nested: {} },
+      attempts: 1,
+    });
+    expect(requests[0].name).toBe("launch_plan_v1");
+    expect(requests[0].system).toBe("Return a launch.");
+    expect(requests[0].schema).toMatchObject({
+      type: "object",
+      required: ["title", "note", "tags", "nested"],
+      additionalProperties: false,
+      properties: {
+        note: { type: ["string", "null"] },
+        tags: { type: ["array", "null"] },
+        nested: {
+          type: "object",
+          required: ["score"],
+          additionalProperties: false,
+          properties: { score: { type: ["number", "null"] } },
+        },
+      },
+    });
   });
 });

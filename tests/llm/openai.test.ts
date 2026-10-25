@@ -50,4 +50,54 @@ describe("OpenAI Responses client", () => {
       "OpenAI returned 401: Invalid key",
     );
   });
+
+  it("uses native strict JSON Schema output when requested", async () => {
+    const doFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(
+        JSON.stringify({
+          output: [
+            { type: "message", content: [{ type: "output_text", text: '{"result":"ok"}' }] },
+          ],
+          usage: { input_tokens: 8, output_tokens: 4 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const llm = createOpenAiLlm({
+      apiKey: "test-key",
+      model: "gpt-6-luna",
+      fetch: doFetch as typeof fetch,
+    });
+    await expect(
+      llm.generateJson!({
+        system: "Return the result.",
+        prompt: "Do it.",
+        name: "test_result",
+        schema: {
+          type: "object",
+          properties: { result: { type: "string" } },
+          required: ["result"],
+          additionalProperties: false,
+        },
+      }),
+    ).resolves.toMatchObject({ text: '{"result":"ok"}' });
+    const body = JSON.parse(String(doFetch.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({
+      text: {
+        verbosity: "low",
+        format: {
+          type: "json_schema",
+          name: "test_result",
+          strict: true,
+          schema: {
+            type: "object",
+            required: ["result"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+  });
 });

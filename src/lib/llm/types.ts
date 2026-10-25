@@ -19,11 +19,19 @@ export interface LlmResponse {
   ms: number;
 }
 
-/** Provider-agnostic text generation. Structured output is layered on top in `structured.ts`. */
+export interface LlmJsonRequest extends LlmRequest {
+  /** Responses API format name: letters, numbers, underscores and dashes only. */
+  name: string;
+  /** A strict-compatible JSON Schema prepared by `structured.ts`. */
+  schema: Record<string, unknown>;
+}
+
+/** Provider-agnostic text generation, with optional provider-native JSON Schema output. */
 export interface LlmClient {
   readonly provider: string;
   readonly model: string;
   generateText(request: LlmRequest): Promise<LlmResponse>;
+  generateJson?(request: LlmJsonRequest): Promise<LlmResponse>;
 }
 
 export class LlmError extends Error {
