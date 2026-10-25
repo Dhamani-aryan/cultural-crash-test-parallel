@@ -18,7 +18,7 @@ Cultural Crash-Test treats those choices as hypotheses. It compares the marketer
 
 ## What the product does
 
-1. A marketer describes the brand, objective, audience, proposed choices and practical constraints in ordinary language.
+1. A marketer describes the brand, objective, audience, proposed choices and practical constraints in ordinary language, or loads the prepared London streetwear example.
 2. The intake assistant structures the brief and asks only for materially missing information.
 3. Three plans are produced independently:
    - the marketer's stated plan;
@@ -26,11 +26,25 @@ Cultural Crash-Test treats those choices as hypotheses. It compares the marketer
    - one evidence-first agent that searches and tests a broader Qloo candidate pool.
 4. Every finalist receives the same audience, locality, role, coherence and constraint checks.
 5. The plans are compared anonymously in both presentation orders.
-6. The leading plan is stress-tested against its strongest distinct runner-up.
-7. When Brave Search is configured, official venue sources can veto a concrete operational conflict. Web search cannot award cultural fit or invent a new recommendation.
-8. The result opens with a plain-language explanation, followed by the finalist table, operational checks and an inspectable decision graph.
+6. A bounded improvement stage can construct a hybrid, but the complete hybrid must be re-tested before it can compete.
+7. The leading plan is stress-tested against its strongest distinct runner-up.
+8. When Brave Search is configured, official venue sources can veto a concrete operational conflict. Web search cannot award cultural fit or invent a new recommendation.
+9. The result opens with **What changed because of Qloo?**, followed by the finalist comparison and expandable evidence. Stability checks, operational sources, usage details and the decision graph remain behind **View details**.
 
 The three displayed columns are finalists, not the entire search space. The result states how many candidates and complete plan combinations the evidence agent examined.
+
+During a live run, the interface streams meaningful research activity—candidate discovery, complete-plan testing, finalist comparison and stability work—rather than exposing raw API calls or showing a generic spinner.
+
+## Fastest way to evaluate it
+
+1. Open the [live application](https://cultural-crash-test-parallel.vercel.app).
+2. Select **Try the London streetwear example**.
+3. Review and confirm the populated brief. The scenario includes recognizable audience anchors, a booked venue that must remain fixed, an excluded collaboration brand and plausible starting choices.
+4. Run the comparison and follow the live research milestones.
+5. Start with **What changed because of Qloo?**, then open **Why this won** for the decisive choice.
+6. Use **View details** to inspect the wider candidate search, official-source venue check, stability audit, evidence ledger and decision graph.
+
+The example fills the brief but does not silently start a run. The user remains in control of confirmation and execution.
 
 ## Why Qloo is essential
 
@@ -58,6 +72,9 @@ natural-language brief
                                      blind, order-rotated comparison
                                                         │
                                                         ▼
+                                  bounded hybrid + complete-plan re-test
+                                                        │
+                                                        ▼
                                            evidence stress tests
                                                         │
                                                         ▼
@@ -67,15 +84,19 @@ natural-language brief
                                       plain-language final recommendation
 ```
 
-The production engine is `crash:v15 + parallel:v7`, with evidence rubric `evidence:v7` and adjudication protocol `adjudicate:v2`. Models generate structured proposals and readings; code enforces schemas, budgets, screens, constraints, scoring, operational vetoes and stopping conditions.
+The production engine is `crash:v15 + parallel:v7`, with evidence rubric `evidence:v7` and adjudication protocol `adjudicate:v2`. Models generate proposals, constrained evidence readings and blind comparisons. Code enforces schemas, budgets, screens, constraints, scoring, operational vetoes, evidence ordering and stopping conditions.
+
+Direct OpenAI calls use the Responses API's native strict JSON Schema Structured Outputs. Zod still validates the returned data, and non-OpenAI/test clients retain the schema-in-prompt fallback.
 
 ## Production behavior
 
-- Next.js App Router with streamed server events for long-running crash tests.
-- OpenAI Responses API for bounded structured model work.
+- Next.js App Router with server-sent events and human-readable live research milestones for long-running crash tests.
+- OpenAI Responses API with native strict Structured Outputs for bounded model work.
 - Qloo remains the source of cultural evidence.
 - Brave Search is used only for bounded operational venue verification.
-- Vercel Upstash Redis shares Qloo caching, completed-run recordings, clarification sessions and IP-based rate limits across serverless instances.
+- Vercel Upstash Redis shares 24-hour Qloo caching, 14-day completed-run recordings, clarification sessions and IP-based rate limits across serverless instances.
+- Replayed results are explicitly labelled with their recording provenance rather than presented as fresh research.
+- Public live runs are limited to three per IP per ten minutes; intake permits thirty turns per IP per ten minutes. Cached replays do not consume the live-run allowance.
 - Brief history is stored in each visitor's browser, is private to that browser and keeps up to 30 chats.
 
 Production supports New York, London, Tokyo, São Paulo, Madrid, Mumbai, Mexico City, Toronto, Sydney, Paris and Berlin.
@@ -118,13 +139,16 @@ npm run lint
 npm run build
 ```
 
-Public release audit on 25 October 2026: **35 test files and 309 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
+Public release audit updated on 26 October 2026: **35 test files and 315 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
 
 ## Repository map
 
 - `src/lib/intake/` — conversational brief extraction and validation.
 - `src/lib/crashtest/` — independent tracks, evidence matrix, agent search, adjudication, stress tests and reports.
 - `src/lib/qloo/` — typed Qloo client, caching and normalization.
+- `src/lib/llm/` — provider abstraction, OpenAI Responses client, native Structured Outputs and Zod validation.
 - `src/lib/operational/` — bounded Brave retrieval, official-source reading and deterministic venue gate.
-- `src/components/` — chat, comparison, plain-language explanation and decision graph.
+- `src/lib/cache/` — in-memory and Upstash-compatible shared caching.
+- `src/lib/server/` — validated request handlers, SSE streaming, replay and rate limits.
+- `src/components/` — chat, prepared example, research progress, marketer-readable comparison and decision graph.
 - `tests/` — synthetic unit, component, server and decision-policy coverage.
