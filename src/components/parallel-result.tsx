@@ -88,11 +88,18 @@ function plainSupportReason(r: RowView): string | null {
   return `${r.final.label} was the strongest ${fit[r.slot]} match found for the intended audience and the rest of the plan.`;
 }
 
+function operationalConflict(reason: string): string {
+  return reason
+    .replace(/^.*?failed the operational check:\s*/i, "")
+    .replace(/\s+No operationally viable alternative was established\.?$/i, "")
+    .trim();
+}
+
 function rowReason(r: RowView, operational?: OperationalAudit): string {
   const override = r.slot === "event_place" ? operational?.override : undefined;
   if (override && r.final.label === override.toVenue) {
     const kept = r.you.label === override.toVenue;
-    return `The cultural evidence process initially recommended ${override.fromVenue}. A current check of official venue sources found that ${override.reason.replace(/^.*?failed the operational check:\s*/i, "").replace(/\s+No operationally viable alternative was established\.?$/i, "")}. We therefore ${kept ? `kept your choice, ${override.toVenue}` : `moved to ${override.toVenue}`}.`;
+    return `Qloo's cultural comparison initially preferred ${override.fromVenue}. The live official-source check found that ${operationalConflict(override.reason)}. The web check did not invent a replacement; it ruled out that finalist, so we ${kept ? `returned to your highest-ranked remaining plan and kept ${override.toVenue}` : `used the highest-ranked remaining plan, ${override.toVenue}`}.`;
   }
   const support = plainSupportReason(r);
   const concern = r.counter.find((claim) => claim.decisive) ?? r.counter[0];
@@ -223,7 +230,7 @@ function DecisionOverview({ state, rows }: { state: RunState; rows: RowView[] })
         })}
         {override && (
           <p>
-            The cultural evidence process initially preferred {override.fromVenue}. A live check of official venue sources found a concrete operational conflict, so the deterministic safety gate {override.toVenue ? `moved the final plan to ${override.toVenue}` : "left the venue unresolved"}. This web check did not rewrite the cultural scores; it only prevented an operationally invalid venue from winning.
+            Qloo&apos;s cultural comparison initially preferred {override.fromVenue}. The live official-source check found that {operationalConflict(override.reason)}. The web check did not create a new recommendation or rewrite the cultural scores; it ruled out that finalist, so the final plan {override.toVenue ? `uses the highest-ranked remaining option, ${override.toVenue}` : "leaves the venue unresolved"}.
           </p>
         )}
         {!override && venueCheck?.status === "verified_fit" && (
@@ -450,7 +457,7 @@ export function ParallelRunResult({ state }: { state: RunState }) {
           </h3>
         </div>
         <div className="overflow-x-auto rounded-xl border border-line bg-panel shadow-sm">
-          <table className="w-full min-w-[920px] table-fixed border-collapse">
+          <table className="w-full min-w-[760px] table-fixed border-collapse lg:min-w-0">
             <colgroup>
               <col className="w-[15%]" />
               <col className="w-[18%]" />

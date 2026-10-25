@@ -66,6 +66,37 @@ describe("parallel results", () => {
     expect(html).toContain('href="https://example.com/venue"');
   });
 
+  it("explains that an operational override rejects a finalist rather than inventing a web recommendation", async () => {
+    const state = await parallel();
+    const candidates = state.parallel!.candidates;
+    const from = candidates.find((candidate) => candidate.candidateId === state.parallel!.verdict.candidateId)!;
+    const to = candidates.find(
+      (candidate) =>
+        candidate.candidateId !== from.candidateId &&
+        candidate.plan.components.some((component) => component.slot === "event_place"),
+    )!;
+    const fromVenue = from.plan.components.find((component) => component.slot === "event_place")!.label;
+    const toVenue = to.plan.components.find((component) => component.slot === "event_place")!.label;
+    state.parallel!.operational = {
+      version: "operational:v1",
+      checkedAt: "2026-10-25T00:00:00.000Z",
+      checks: [],
+      override: {
+        fromCandidateId: from.candidateId,
+        fromVenue,
+        toCandidateId: to.candidateId,
+        toVenue,
+        reason: `${fromVenue} failed the operational check: its official site identifies it as the wrong venue type.`,
+      },
+    };
+    state.parallel!.verdict = { ...state.parallel!.verdict, candidateId: to.candidateId };
+    const html = renderToStaticMarkup(<RunResult state={state} />);
+    expect(html).toContain(`Qloo&#x27;s cultural comparison initially preferred ${fromVenue}`);
+    expect(html).toContain("official site identifies it as the wrong venue type");
+    expect(html).toContain("did not create a new recommendation");
+    expect(html).toContain(`highest-ranked remaining option, ${toVenue}`);
+  });
+
   it("shows You, LLM, Evidence-first agent and Final verdict for every choice, with Not specified for open user slots", async () => {
     const html = renderToStaticMarkup(
       <RunResult

@@ -295,7 +295,11 @@ export function ChatApp() {
         ) : (
           <>
             <main className="flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-[880px] space-y-6 px-5 pb-8 pt-10 sm:px-8">
+              <div
+                className={`mx-auto w-full space-y-6 px-5 pb-8 pt-10 sm:px-8 ${
+                  view.result ? "max-w-[1120px]" : "max-w-[880px]"
+                }`}
+              >
                 {messages.map((m, i) => (
                   <div key={m.id} className="space-y-3">
                     <Bubble role={m.role}>{m.text}</Bubble>
