@@ -42,6 +42,9 @@ concrete operational contradiction: the venue is the wrong kind of establishment
 event, is closed, explicitly cannot host the event format, or its stated maximum capacity is below
 the stated attendance. Taste or cultural affinity is not an operational conflict. "Fits" requires
 an explicit source saying the venue supports the relevant event format and any stated attendance.
+An official source identifying a venue as a strip club, adult-entertainment venue, or gentlemen's
+club is a wrong-establishment-type conflict for an ordinary brand product launch unless the brief
+explicitly calls for adult entertainment; this conflict does not also require a capacity failure.
 Current dates, price and willingness are always unknown unless explicitly stated. Mark a source
 official only when it is clearly the venue or venue owner's own website. Cite only source indices.`;
 
@@ -66,7 +69,10 @@ export class BraveOperationalClient implements OperationalResearchClient {
     const searched = await Promise.all(
       unique.map(async (venue) => {
         const url = new URL(this.baseUrl);
-        url.searchParams.set("q", `\"${venue}\" \"${input.city}\" official venue hire capacity events`);
+        url.searchParams.set(
+          "q",
+          `\"${venue}\" \"${input.city}\" official website venue type capacity events club`,
+        );
         url.searchParams.set("count", "5");
         const response = await this.doFetch(url, {
           headers: { Accept: "application/json", "X-Subscription-Token": this.apiKey },

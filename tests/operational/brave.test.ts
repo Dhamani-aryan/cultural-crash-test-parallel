@@ -25,23 +25,27 @@ describe("Brave operational research", () => {
     const llm: LlmClient = {
       provider: "fake",
       model: "fake",
-      generateText: async () => ({
-        text: JSON.stringify({
-          venues: [
-            {
-              venue: "Venue",
-              verdict: "conflicts",
-              finding: "Its stated maximum is below the 220-person launch.",
-              facts: ["Capacity is 100."],
-              sourceIndices: [0],
-              officialSourceIndices: [0],
-            },
-          ],
-        }),
-        usage: null,
-        model: "fake",
-        ms: 1,
-      }),
+      generateText: async (request) => {
+        expect(request.system).toContain("adult-entertainment venue");
+        expect(request.system).toContain("does not also require a capacity failure");
+        return {
+          text: JSON.stringify({
+            venues: [
+              {
+                venue: "Venue",
+                verdict: "conflicts",
+                finding: "Its stated maximum is below the 220-person launch.",
+                facts: ["Capacity is 100."],
+                sourceIndices: [0],
+                officialSourceIndices: [0],
+              },
+            ],
+          }),
+          usage: null,
+          model: "fake",
+          ms: 1,
+        };
+      },
     };
     const client = new BraveOperationalClient("secret", llm, undefined, doFetch as typeof fetch);
     const result = await client.verifyVenues({
@@ -56,7 +60,10 @@ describe("Brave operational research", () => {
     expect(result.modelCalls).toBe(1);
     expect(result.checks[0].status).toBe("verified_conflict");
     expect(doFetch).toHaveBeenCalledTimes(1);
-    const [, init] = doFetch.mock.calls[0];
+    const [input, init] = doFetch.mock.calls[0];
+    const query = new URL(String(input)).searchParams.get("q");
+    expect(query).toContain('"Venue" "London" official website');
+    expect(query).not.toContain("official venue hire");
     expect((init?.headers as Record<string, string>)["X-Subscription-Token"]).toBe("secret");
   });
 });
