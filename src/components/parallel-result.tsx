@@ -53,50 +53,86 @@ const STATE_TONE: Record<CellView["state"], string> = {
   abstained: "text-muted",
 };
 
+const STATE_SURFACE: Record<CellView["state"], string> = {
+  supported:
+    "border-supported/20 bg-gradient-to-br from-supported/[0.10] via-supported/[0.035] to-transparent",
+  plausible_thin:
+    "border-weak/20 bg-gradient-to-br from-weak/[0.09] via-weak/[0.025] to-transparent",
+  conflicting:
+    "border-conflict/20 bg-gradient-to-br from-conflict/[0.10] via-conflict/[0.035] to-transparent",
+  rejected:
+    "border-nosupport/20 bg-gradient-to-br from-nosupport/[0.10] via-nosupport/[0.035] to-transparent",
+  unverified: "border-line bg-gradient-to-br from-ink/[0.035] to-transparent",
+  needs_human: "border-line bg-gradient-to-br from-ink/[0.035] to-transparent",
+  not_specified: "border-line/80 bg-panel-2/25",
+  abstained: "border-line/80 bg-panel-2/25",
+};
+
+const STATE_DOT: Record<CellView["state"], string> = {
+  supported: "bg-supported",
+  plausible_thin: "bg-weak",
+  conflicting: "bg-conflict",
+  rejected: "bg-nosupport",
+  unverified: "bg-unresolved",
+  needs_human: "bg-unresolved",
+  not_specified: "bg-muted",
+  abstained: "bg-muted",
+};
+
 function Cell({
   c,
   emphasis = false,
+  selected = false,
   source,
 }: {
   c: CellView;
   emphasis?: boolean;
+  selected?: boolean;
   source?: string | null;
 }) {
   return (
-    <div className="min-w-0 break-words">
-      <p
-        className={`text-[15px] leading-5 text-ink ${emphasis ? "font-semibold" : c.state === "not_specified" || c.state === "abstained" ? "text-muted" : "font-medium"}`}
-      >
-        {c.label}
-      </p>
-      <p className={`mt-1 text-xs font-medium leading-4 ${STATE_TONE[c.state]}`}>{c.status}</p>
-      {source && <p className="mt-0.5 text-xs leading-4 text-muted">{source}</p>}
-      {c.note && <p className="mt-0.5 text-xs leading-4 text-muted">{c.note}</p>}
+    <div
+      className={`min-h-[78px] min-w-0 break-words rounded-lg border px-3 py-3 ${STATE_SURFACE[c.state]}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p
+          className={`text-sm leading-5 text-ink ${emphasis ? "font-semibold" : c.state === "not_specified" || c.state === "abstained" ? "text-muted" : "font-medium"}`}
+        >
+          {c.label}
+        </p>
+        {selected && (
+          <span className="shrink-0 rounded-full border border-supported/25 bg-supported/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-[0.08em] text-supported">
+            Selected
+          </span>
+        )}
+      </div>
+      <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-medium ${STATE_TONE[c.state]}`}>
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATE_DOT[c.state]}`} aria-hidden />
+        <span>{c.status}</span>
+      </div>
+      {source && <p className="mt-1 text-[11px] leading-4 text-muted">{source}</p>}
     </div>
   );
 }
 
+function concise(text: string, limit = 170): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= limit) return normalized;
+  const clipped = normalized.slice(0, limit + 1);
+  const lastSpace = clipped.lastIndexOf(" ");
+  return `${clipped.slice(0, lastSpace > limit * 0.7 ? lastSpace : limit).replace(/[,:;\s]+$/, "")}…`;
+}
+
 function ClaimList({ title, claims, tone }: { title: string; claims: ClaimView[]; tone: string }) {
   if (!claims.length) return null;
+  const claim = claims.find((item) => item.decisive) ?? claims[0];
   return (
-    <div>
-      <p className={`text-xs font-semibold ${tone}`}>{title}</p>
-      <ul className="mt-1 space-y-2">
-        {claims.map((c) => (
-          <li key={c.claimId} className="text-[13px] leading-5 text-ink-2">
-            <SourceBadge source={c.source} />
-            {c.decisive && (
-              <span className="mr-1.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-ink">
-                Decisive
-              </span>
-            )}
-            {c.text}
-            {c.limitations.length > 0 && (
-              <span className="text-muted"> ({c.limitations.join(" ")})</span>
-            )}
-          </li>
-        ))}
-      </ul>
+    <div className="rounded-lg border border-line/80 bg-panel px-3 py-2.5">
+      <p className={`text-[11px] font-semibold ${tone}`}>{title}</p>
+      <p className="mt-1 text-xs leading-5 text-ink-2">
+        <SourceBadge source={claim.source} />
+        {concise(claim.text)}
+      </p>
     </div>
   );
 }
@@ -189,13 +225,10 @@ function rowReason(r: RowView, operational?: OperationalAudit): string {
   const override = r.slot === "event_place" ? operational?.override : undefined;
   if (override && r.final.label === override.toVenue) {
     const kept = r.you.label === override.toVenue;
-    return `Qloo's cultural comparison initially preferred ${override.fromVenue}. The live official-source check found that ${operationalConflict(override.reason)}. The web check did not invent a replacement; it ruled out that finalist, so we ${kept ? `returned to your highest-ranked remaining plan and kept ${override.toVenue}` : `used the highest-ranked remaining plan, ${override.toVenue}`}.`;
+    return `An official-source check ruled out ${override.fromVenue}. We ${kept ? `kept your next-ranked choice, ${override.toVenue}` : `used the next-ranked choice, ${override.toVenue}`}.`;
   }
   const support = plainSupportReason(r);
   const concern = r.counter.find((claim) => claim.decisive) ?? r.counter[0];
-  const agentAlternative = r.alternatives.find((alternative) =>
-    alternative.track.toLowerCase().includes("agent"),
-  );
   const hasUserChoice =
     !!r.you.candidateId && r.you.state !== "not_specified" && r.you.state !== "abstained";
   const sameAsUser = hasUserChoice && r.you.label === r.final.label;
@@ -205,15 +238,11 @@ function rowReason(r: RowView, operational?: OperationalAudit): string {
       ? `We changed this choice from ${r.you.label} to ${r.final.label}.`
       : `The final plan uses ${r.final.label}.`;
   const evidence = support
-    ? ` ${support}`
+    ? ` ${concise(support)}`
     : concern
-      ? ` It remains the strongest complete-plan option despite this concern: ${concern.text}`
+      ? ` It remained the strongest complete-plan option despite one concern.`
       : " No tested alternative produced a stronger complete plan.";
-  const comparison =
-    agentAlternative && agentAlternative.label !== r.final.label
-      ? ` The evidence agent also tested ${agentAlternative.label}, but it finished as ${agentAlternative.status.toLowerCase()}.`
-      : "";
-  return `${opening}${evidence}${comparison}`;
+  return `${opening}${evidence}`;
 }
 
 function Row({ r, operational }: { r: RowView; operational?: OperationalAudit }) {
@@ -226,17 +255,17 @@ function Row({ r, operational }: { r: RowView; operational?: OperationalAudit })
         >
           {r.title}
         </th>
-        <td className="w-[19%] px-4 py-5">
+        <td className="w-[19%] px-2.5 py-3">
           <Cell c={r.you} />
         </td>
-        <td className="w-[19%] border-l border-line px-4 py-5">
+        <td className="w-[19%] border-l border-line px-2.5 py-3">
           <Cell c={r.llm} />
         </td>
-        <td className="w-[19%] border-l border-line px-4 py-5">
+        <td className="w-[19%] border-l border-line px-2.5 py-3">
           <Cell c={r.agent} />
         </td>
-        <td className="w-[29%] border-l-2 border-ink/20 bg-panel-2/40 px-4 py-5">
-          <Cell c={r.final} emphasis source={r.final.source} />
+        <td className="w-[29%] border-l-2 border-ink/20 bg-panel-2/30 px-2.5 py-3">
+          <Cell c={r.final} emphasis selected source={r.final.source} />
         </td>
       </tr>
       <tr>
@@ -245,26 +274,18 @@ function Row({ r, operational }: { r: RowView; operational?: OperationalAudit })
             <summary className="min-h-9 cursor-pointer py-1 text-xs font-medium text-accent">
               Why this won
             </summary>
-            <p className="max-w-4xl pb-3 text-sm leading-6 text-ink-2">
+            <p className="max-w-3xl pb-3 text-[13px] leading-5 text-ink-2">
               {rowReason(r, operational)}
             </p>
-            <div className="max-w-4xl space-y-4 pb-3">
-              <ClaimList title="Why it fits" claims={r.support} tone="text-supported" />
-              <ClaimList title="What argues against it" claims={r.counter} tone="text-conflict" />
+            <div className="grid max-w-4xl gap-2 pb-3 md:grid-cols-3">
+              <ClaimList title="Key support" claims={r.support} tone="text-supported" />
+              <ClaimList title="Main concern" claims={r.counter} tone="text-conflict" />
               <ClaimList
-                title="What still needs checking"
+                title="Still to confirm"
                 claims={r.uncertain}
                 tone="text-unresolved"
               />
             </div>
-            {r.alternatives.length > 0 && (
-              <p className="pb-2 text-xs text-muted">
-                Other picks:{" "}
-                {r.alternatives
-                  .map((a) => `${a.track}: ${a.label} (${a.status.toLowerCase()})`)
-                  .join(" · ")}
-              </p>
-            )}
           </details>
         </td>
       </tr>

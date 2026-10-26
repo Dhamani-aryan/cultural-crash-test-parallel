@@ -116,6 +116,10 @@ describe("parallel results", () => {
     expect(html.match(/Not specified/g)!.length).toBe(3);
     // Reasons start collapsed behind a visible "Why this won" control.
     expect(html.match(/<details><summary[^>]*>Why this won<\/summary>/g)).toHaveLength(4);
+    expect(html).toContain("Selected");
+    expect(html).toContain("from-supported/[0.10]");
+    expect(html).toContain("from-conflict/[0.10]");
+    expect(html).not.toContain("Other picks:");
   });
 
   it("keeps the marketer view focused and places judge diagnostics behind one details control", async () => {
@@ -158,8 +162,10 @@ describe("parallel results", () => {
     expect(venue.support.find((claim) => claim.claimId.endsWith("official-test"))?.source).toBe(
       "Official venue source",
     );
+    // The default table intentionally shows only the decisive support claim. The full receipt
+    // retains the correctly labelled official-source claim behind View details.
     const html = renderToStaticMarkup(<RunResult state={state} />);
-    expect(html).toContain("Official venue source");
+    expect(html).toContain("View details");
   });
 
   it("surfaces an unresolved live venue check in marketer language", async () => {
@@ -249,7 +255,7 @@ describe("parallel results", () => {
         })}
       />,
     );
-    expect(html).toMatch(/text-unresolved[^>]*>Needs human confirmation/);
+    expect(html).toMatch(/text-unresolved[\s\S]{0,300}Needs human confirmation/);
   });
 
   it("never presents a zero-support ordering as a validated best plan", async () => {
