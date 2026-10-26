@@ -168,7 +168,7 @@ describe("parallel results", () => {
     expect(html).toContain("View details");
   });
 
-  it("turns affinity scores into plain-language points in the comparison table", async () => {
+  it("keeps understandable rank evidence while hiding raw affinity scores", async () => {
     const state = await parallel();
     const winner = state.parallel!.verdict.candidateId!;
     const claimId = `${winner}/artist_music/plain-language-test`;
@@ -189,7 +189,9 @@ describe("parallel results", () => {
     state.parallel!.final.decisiveClaimIds = [claimId];
 
     const html = renderToStaticMarkup(<RunResult state={state} />);
-    expect(html).toContain("Strong cultural fit with the intended audience in London.");
+    expect(html).toContain(
+      "Strong audience fit. Ranked first among 50 artist candidates tested for this London audience.",
+    );
     expect(html).not.toContain("affinity 0.979");
     expect(html).not.toContain("#1 of 50");
     expect(html).not.toContain("strongest link:");

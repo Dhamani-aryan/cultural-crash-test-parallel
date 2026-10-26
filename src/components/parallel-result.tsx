@@ -125,7 +125,43 @@ function concise(text: string, limit = 170): string {
 
 type ClaimKind = "support" | "concern" | "confirm";
 
-function humanClaim(claim: ClaimView, kind: ClaimKind): string {
+const CANDIDATE_KIND: Record<Slot, string> = {
+  artist_music: "artist candidates",
+  brand_collaboration: "collaboration candidates",
+  event_place: "venue candidates",
+  creative_direction: "creative-direction options",
+};
+
+function rankWord(rank: number): string {
+  if (rank === 1) return "first";
+  if (rank === 2) return "second";
+  if (rank === 3) return "third";
+  const mod100 = rank % 100;
+  const suffix =
+    mod100 >= 11 && mod100 <= 13
+      ? "th"
+      : rank % 10 === 1
+        ? "st"
+        : rank % 10 === 2
+          ? "nd"
+          : rank % 10 === 3
+            ? "rd"
+            : "th";
+  return `${rank}${suffix}`;
+}
+
+function audienceRankFact(text: string, slot: Slot): string | null {
+  const match = text.match(
+    /#(\d+) of (\d+) for this audience in ([A-Z][A-Za-zÀ-ÖØ-öø-ÿ .'-]+?)(?:\s*\(|[.;]|$)/,
+  );
+  if (!match) return null;
+  const rank = Number(match[1]);
+  const count = Number(match[2]);
+  if (!Number.isFinite(rank) || !Number.isFinite(count)) return null;
+  return `Ranked ${rankWord(rank)} among ${count} ${CANDIDATE_KIND[slot]} tested for this ${match[3].trim()} audience.`;
+}
+
+function humanClaim(claim: ClaimView, kind: ClaimKind, slot: Slot): string {
   const namedChoice = claim.text.match(/(?:Keeps|Replaces) "([^"]+)"/)?.[1];
   if (claim.dimension === "Constraint compliance" && namedChoice) {
     return kind === "support"
@@ -136,9 +172,12 @@ function humanClaim(claim: ClaimView, kind: ClaimKind): string {
   const city = claim.text
     .match(/\bin ([A-Z][A-Za-zÀ-ÖØ-öø-ÿ .'-]+?)(?:\s*\(|[.;]|$)/)?.[1]
     ?.trim();
+  const rankFact = audienceRankFact(claim.text, slot);
   const language: Record<string, Record<ClaimKind, string>> = {
     "Audience fit": {
-      support: `Strong cultural fit with the intended audience${city ? ` in ${city}` : ""}.`,
+      support: rankFact
+        ? `Strong audience fit. ${rankFact}`
+        : `Strong cultural fit with the intended audience${city ? ` in ${city}` : ""}.`,
       concern: "The audience fit was weaker than the leading alternatives.",
       confirm: "There was not enough audience evidence to confirm the fit.",
     },
@@ -196,11 +235,13 @@ function ClaimList({
   claims,
   tone,
   kind,
+  slot,
 }: {
   title: string;
   claims: ClaimView[];
   tone: string;
   kind: ClaimKind;
+  slot: Slot;
 }) {
   if (!claims.length) return null;
   const claim = claims.find((item) => item.decisive) ?? claims[0];
@@ -211,7 +252,7 @@ function ClaimList({
         <span className={tone} aria-hidden>
           •
         </span>
-        <span>{humanClaim(claim, kind)}</span>
+        <span>{humanClaim(claim, kind, slot)}</span>
       </p>
     </div>
   );
@@ -363,18 +404,21 @@ function Row({ r, operational }: { r: RowView; operational?: OperationalAudit })
                 claims={r.support}
                 tone="text-supported"
                 kind="support"
+                slot={r.slot}
               />
               <ClaimList
                 title="Main concern"
                 claims={r.counter}
                 tone="text-conflict"
                 kind="concern"
+                slot={r.slot}
               />
               <ClaimList
                 title="Still to confirm"
                 claims={r.uncertain}
                 tone="text-unresolved"
                 kind="confirm"
+                slot={r.slot}
               />
             </div>
           </details>
