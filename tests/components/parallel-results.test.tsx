@@ -168,6 +168,33 @@ describe("parallel results", () => {
     expect(html).toContain("View details");
   });
 
+  it("turns affinity scores into plain-language points in the comparison table", async () => {
+    const state = await parallel();
+    const winner = state.parallel!.verdict.candidateId!;
+    const claimId = `${winner}/artist_music/plain-language-test`;
+    state.parallel!.matrix.claims.push({
+      claimId,
+      candidateId: winner,
+      slot: "artist_music",
+      dimension: "audience",
+      stance: "supports",
+      source: "qloo_affinity",
+      claim:
+        "Example artist: #1 of 50 for this audience in London (affinity 0.979); strongest link: Palace Skateboards (0.36).",
+      evidenceIds: [],
+      ruleId: "R-qloo-audience",
+      strength: "strong",
+      limitations: [],
+    });
+    state.parallel!.final.decisiveClaimIds = [claimId];
+
+    const html = renderToStaticMarkup(<RunResult state={state} />);
+    expect(html).toContain("Strong cultural fit with the intended audience in London.");
+    expect(html).not.toContain("affinity 0.979");
+    expect(html).not.toContain("#1 of 50");
+    expect(html).not.toContain("strongest link:");
+  });
+
   it("surfaces an unresolved live venue check in marketer language", async () => {
     const state = await parallel();
     const venue = parallelView(state)!.rows.find((row) => row.slot === "event_place")!.final.label;

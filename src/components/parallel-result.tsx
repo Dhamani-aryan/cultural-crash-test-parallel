@@ -123,15 +123,95 @@ function concise(text: string, limit = 170): string {
   return `${clipped.slice(0, lastSpace > limit * 0.7 ? lastSpace : limit).replace(/[,:;\s]+$/, "")}…`;
 }
 
-function ClaimList({ title, claims, tone }: { title: string; claims: ClaimView[]; tone: string }) {
+type ClaimKind = "support" | "concern" | "confirm";
+
+function humanClaim(claim: ClaimView, kind: ClaimKind): string {
+  const namedChoice = claim.text.match(/(?:Keeps|Replaces) "([^"]+)"/)?.[1];
+  if (claim.dimension === "Constraint compliance" && namedChoice) {
+    return kind === "support"
+      ? `Keeps your original choice, ${namedChoice}.`
+      : `This changes your original choice, ${namedChoice}.`;
+  }
+
+  const city = claim.text
+    .match(/\bin ([A-Z][A-Za-zÀ-ÖØ-öø-ÿ .'-]+?)(?:\s*\(|[.;]|$)/)?.[1]
+    ?.trim();
+  const language: Record<string, Record<ClaimKind, string>> = {
+    "Audience fit": {
+      support: `Strong cultural fit with the intended audience${city ? ` in ${city}` : ""}.`,
+      concern: "The audience fit was weaker than the leading alternatives.",
+      confirm: "There was not enough audience evidence to confirm the fit.",
+    },
+    "Local relevance": {
+      support: "Meaningful connection to the launch city.",
+      concern: "The choice feels less locally relevant than the alternatives.",
+      confirm: "Its local relevance still needs confirmation.",
+    },
+    "Cross-slot coherence": {
+      support: "Works well with the other choices in the plan.",
+      concern: "Fits less naturally with the rest of the plan.",
+      confirm: "Its fit with the complete plan remains uncertain.",
+    },
+    "Brief and role fit": {
+      support: "Fits the role and direction described in the brief.",
+      concern: "May not fully match the role required by the brief.",
+      confirm: "Its role in the launch still needs confirmation.",
+    },
+    "Entity correctness": {
+      support: "Matched to the intended real-world artist, brand or venue.",
+      concern: "The available information may refer to the wrong real-world match.",
+      confirm: "There was not enough information to verify this choice confidently.",
+    },
+    Feasibility: {
+      support: "The available information supports this as a workable choice.",
+      concern: "A practical issue may prevent this choice from working.",
+      confirm: "Practical suitability still needs direct confirmation.",
+    },
+    Distinctiveness: {
+      support: "Adds a distinctive angle without weakening the overall plan.",
+      concern: "Feels more generic than the strongest alternatives.",
+      confirm: "Its distinctiveness could not be established confidently.",
+    },
+    Diversity: {
+      support: "Adds useful variety to the complete plan.",
+      concern: "Overlaps too heavily with another choice in the plan.",
+      confirm: "Its contribution to the plan still needs review.",
+    },
+    "Evidence coverage": {
+      support: "Supported by enough evidence to compare confidently.",
+      concern: "The evidence was thinner than for the leading alternatives.",
+      confirm: "More evidence is needed before relying on this choice.",
+    },
+    "Constraint compliance": {
+      support: "Follows the requirements set in your brief.",
+      concern: "Conflicts with a requirement in your brief.",
+      confirm: "A requirement in the brief still needs confirmation.",
+    },
+  };
+  return language[claim.dimension]?.[kind] ?? concise(claim.text);
+}
+
+function ClaimList({
+  title,
+  claims,
+  tone,
+  kind,
+}: {
+  title: string;
+  claims: ClaimView[];
+  tone: string;
+  kind: ClaimKind;
+}) {
   if (!claims.length) return null;
   const claim = claims.find((item) => item.decisive) ?? claims[0];
   return (
-    <div className="rounded-lg border border-line/80 bg-panel px-3 py-2.5">
+    <div className="min-w-0">
       <p className={`text-[11px] font-semibold ${tone}`}>{title}</p>
-      <p className="mt-1 text-xs leading-5 text-ink-2">
-        <SourceBadge source={claim.source} />
-        {concise(claim.text)}
+      <p className="mt-1 flex gap-2 text-xs leading-5 text-ink-2">
+        <span className={tone} aria-hidden>
+          •
+        </span>
+        <span>{humanClaim(claim, kind)}</span>
       </p>
     </div>
   );
@@ -278,12 +358,23 @@ function Row({ r, operational }: { r: RowView; operational?: OperationalAudit })
               {rowReason(r, operational)}
             </p>
             <div className="grid max-w-4xl gap-2 pb-3 md:grid-cols-3">
-              <ClaimList title="Key support" claims={r.support} tone="text-supported" />
-              <ClaimList title="Main concern" claims={r.counter} tone="text-conflict" />
+              <ClaimList
+                title="Key support"
+                claims={r.support}
+                tone="text-supported"
+                kind="support"
+              />
+              <ClaimList
+                title="Main concern"
+                claims={r.counter}
+                tone="text-conflict"
+                kind="concern"
+              />
               <ClaimList
                 title="Still to confirm"
                 claims={r.uncertain}
                 tone="text-unresolved"
+                kind="confirm"
               />
             </div>
           </details>
