@@ -99,14 +99,22 @@ function Cell({
           className={`text-sm leading-5 text-ink ${emphasis ? "font-semibold" : c.state === "not_specified" || c.state === "abstained" ? "text-muted" : "font-medium"}`}
         >
           {c.label}
+          {c.alternative && (
+            <>
+              <span className="mx-1 text-muted">/</span>
+              {c.alternative}
+            </>
+          )}
         </p>
         {selected && (
           <span className="shrink-0 rounded-full border border-supported/25 bg-supported/10 px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase tracking-[0.08em] text-supported">
-            Selected
+            {c.alternative ? "Options" : "Selected"}
           </span>
         )}
       </div>
-      <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-medium ${STATE_TONE[c.state]}`}>
+      <div
+        className={`mt-2 flex items-center gap-1.5 text-[11px] font-medium ${STATE_TONE[c.state]}`}
+      >
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATE_DOT[c.state]}`} aria-hidden />
         <span>{c.status}</span>
       </div>
@@ -169,9 +177,7 @@ function humanClaim(claim: ClaimView, kind: ClaimKind, slot: Slot): string {
       : `This changes your original choice, ${namedChoice}.`;
   }
 
-  const city = claim.text
-    .match(/\bin ([A-Z][A-Za-zÀ-ÖØ-öø-ÿ .'-]+?)(?:\s*\(|[.;]|$)/)?.[1]
-    ?.trim();
+  const city = claim.text.match(/\bin ([A-Z][A-Za-zÀ-ÖØ-öø-ÿ .'-]+?)(?:\s*\(|[.;]|$)/)?.[1]?.trim();
   const rankFact = audienceRankFact(claim.text, slot);
   const language: Record<string, Record<ClaimKind, string>> = {
     "Audience fit": {
@@ -347,6 +353,9 @@ function rowReason(r: RowView, operational?: OperationalAudit): string {
   if (override && r.final.label === override.toVenue) {
     const kept = r.you.label === override.toVenue;
     return `An official-source check ruled out ${override.fromVenue}. We ${kept ? `kept your next-ranked choice, ${override.toVenue}` : `used the next-ranked choice, ${override.toVenue}`}.`;
+  }
+  if (r.final.alternative) {
+    return `${r.final.label} and ${r.final.alternative} both remain workable, but the cultural evidence is too thin to separate them confidently. Choose between them using availability, budget, logistics and direct brand fit.`;
   }
   const support = plainSupportReason(r);
   const concern = r.counter.find((claim) => claim.decisive) ?? r.counter[0];

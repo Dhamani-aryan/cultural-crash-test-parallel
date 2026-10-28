@@ -16,7 +16,7 @@ import {
   runEvidenceAgent,
 } from "./agent";
 import { JUDGE_SYSTEM } from "./adjudicate";
-import { componentRank, optimize, rankBetter, type OptimizeResult } from "./hybrid";
+import { componentRank, judgeHybrid, optimize, rankBetter, type OptimizeResult } from "./hybrid";
 import { CONTRACT_VERSION, compileIntent, type IntentContract } from "./intent";
 import { BudgetExceeded, budgeted, createLedger, memoized, scopedLedger } from "./ledger";
 import { buildEvidenceMatrix, claimsOf, type MatrixContext } from "./matrix";
@@ -27,6 +27,7 @@ import { auditRecommendationStability } from "./stability";
 import {
   addOperationalClaims,
   applyOperationalGate,
+  operationalSalvageSource,
   operationalVenues,
 } from "@/lib/operational/gate";
 import type { OperationalAudit, VenueOperationalCheck } from "@/lib/operational/types";
@@ -578,6 +579,91 @@ export async function runParallelCrashTest(
         state.llmCalls += checked.modelCalls;
         usage.improvement.llmCalls += checked.modelCalls;
         usage.improvement.ms += Date.now() - started;
+
+        // A bad venue must not erase unrelated cultural improvements. When the preliminary
+        // winner's venue is ruled out by an official source, build one bounded salvage plan:
+        // keep its music/brand/direction and substitute the user's non-conflicting venue. The
+        // mixed plan still has to beat the user's complete plan under the normal material-change
+        // guard before it may become the operational fallback.
+        const salvageSource = operationalSalvageSource(candidates, fin, checked.checks);
+        const userEval = salvageSource?.user.evaluation;
+        if (salvageSource && userEval) {
+          const { preliminary, user, preliminaryVenue, userVenue, conflict } = salvageSource;
+          const salvageStarted = Date.now();
+          const salvagePlan: CulturalPlan = {
+            ...structuredClone(preliminary.plan),
+            components: preliminary.plan.components.map((component) =>
+              component.slot === "event_place"
+                ? structuredClone(userVenue)
+                : structuredClone(component),
+            ),
+          };
+          await ensureFacts([salvagePlan]);
+          const salvageEval = await evaluateIn("improvement")(salvagePlan);
+          const salvageId = "operational-hybrid-1";
+          const salvage: CandidatePlan = {
+            candidateId: salvageId,
+            track: "hybrid",
+            blindId: blindId(),
+            briefFingerprint: frozen.fingerprint,
+            plan: salvagePlan,
+            open: preliminary.open.filter((slot) => slot.slot !== "event_place"),
+            sources: {
+              ...preliminary.sources,
+              event_place: user.sources.event_place ?? "user",
+            },
+            evaluation: salvageEval,
+            assumptions: [
+              `The official-source check ruled out ${preliminaryVenue.label}; the plan retains the culturally stronger non-venue choices and uses ${userVenue.label}.`,
+            ],
+            parent: preliminary.candidateId,
+            provenance: snapshot("improvement", salvageStarted),
+          };
+          const pair = matrixOf([user, salvage]);
+          const judged = judgeHybrid(userEval, salvageEval, pair.hardFailures[salvageId] ?? []);
+          if (judged.accepted) {
+            candidates.push(salvage);
+            contenders.push(salvage);
+            fin = {
+              ...fin,
+              candidateIds: [...new Set([...fin.candidateIds, salvageId])],
+              evidenceOrder: [
+                preliminary.candidateId,
+                salvageId,
+                ...fin.evidenceOrder.filter(
+                  (candidateId) =>
+                    candidateId !== preliminary.candidateId && candidateId !== salvageId,
+                ),
+              ],
+            };
+            improvement?.hybrids.push(salvage);
+            improvement?.rounds.push({
+              round: (improvement?.rounds.length ?? 0) + 1,
+              incumbent: preliminary.candidateId,
+              challenges: [
+                {
+                  kind: "constraint",
+                  candidateId: preliminary.candidateId,
+                  slot: "event_place",
+                  detail: conflict.finding,
+                  claimIds: [`${preliminary.candidateId}/event_place/operational`],
+                },
+              ],
+              attempts: [
+                {
+                  candidateId: salvageId,
+                  parent: preliminary.candidateId,
+                  kind: "swap",
+                  slot: "event_place",
+                  accepted: true,
+                  reason: `Replaced only the rejected venue with ${userVenue.label}; the complete mixed plan tested materially better than the user's original plan.`,
+                  retest: judged.retest,
+                },
+              ],
+              accepted: salvageId,
+            });
+          }
+        }
         const gated = applyOperationalGate(candidates, fin, checked.checks);
         fin = gated.result;
         operational = {

@@ -26,6 +26,8 @@ export interface CellView {
   /** "Not specified", "Left open", or the component's state for a person. */
   status: string;
   state: ComponentState | "not_specified" | "abstained";
+  /** A genuinely equivalent thin-evidence option. The primary plan remains unchanged. */
+  alternative?: string;
   note?: string;
 }
 
@@ -211,6 +213,21 @@ export function parallelView(state: RunState): ParallelView | null {
           status: "Needs a person",
           state: "unverified" as const,
         };
+    // A thin result is not a meaningful winner over another thin result. Keep the selected
+    // complete plan as the primary value, but show the other workable choice so a marketer can
+    // decide from price, availability and logistics. Rejected or conflicting choices never get
+    // this treatment.
+    const equivalent = [you, agent].find(
+      (choice) =>
+        choice.candidateId &&
+        choice.label !== fin.label &&
+        choice.state === "plausible_thin" &&
+        fin.state === "plausible_thin",
+    );
+    if (equivalent) {
+      fin.alternative = equivalent.label;
+      fin.status = "Both workable — choose by logistics";
+    }
     const source = F?.sources[slot] ? SOURCE_LABEL[F.sources[slot]!] : null;
     const claims = F
       ? p.matrix.claims.filter((c) => c.candidateId === F.candidateId && c.slot === slot)

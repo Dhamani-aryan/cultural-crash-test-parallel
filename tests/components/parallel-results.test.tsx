@@ -122,6 +122,38 @@ describe("parallel results", () => {
     expect(html).not.toContain("Other picks:");
   });
 
+  it("shows both choices when the selected and agent options are equally plausible but thin", async () => {
+    const state = await parallel({
+      ...LONDON_BRIEF,
+      existingChoices: [{ slot: "artist_music", name: "Big Tex" }],
+    });
+    const p = state.parallel!;
+    const user = p.candidates.find((candidate) => candidate.candidateId === "user")!;
+    const agent = p.candidates.find((candidate) => candidate.candidateId === "agent")!;
+    const slot = "artist_music" as const;
+    const userLabel = user.plan.components.find((component) => component.slot === slot)!.label;
+    const agentLabel = agent.plan.components.find((component) => component.slot === slot)!.label;
+    p.verdict = { ...p.verdict, candidateId: "user", track: "user", plan: user.plan };
+    p.matrix.componentStates.user = {
+      ...p.matrix.componentStates.user,
+      [slot]: "plausible_thin",
+    };
+    p.matrix.componentStates.agent = {
+      ...p.matrix.componentStates.agent,
+      [slot]: "plausible_thin",
+    };
+
+    const row = parallelView(state)!.rows.find((item) => item.slot === slot)!;
+    expect(row.final.label).toBe(userLabel);
+    expect(row.final.alternative).toBe(agentLabel);
+    expect(row.final.status).toBe("Both workable — choose by logistics");
+
+    const html = renderToStaticMarkup(<RunResult state={state} />);
+    expect(html).toContain("Both workable — choose by logistics");
+    expect(html).toContain("Options");
+    expect(html).toContain("availability, budget, logistics and direct brand fit");
+  });
+
   it("keeps the marketer view focused and places judge diagnostics behind one details control", async () => {
     const state = await parallel();
     const html = renderToStaticMarkup(<RunResult state={state} />);

@@ -38,8 +38,10 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * bans on every noun they contain.
  * v7: a bounded official-source venue check can veto a concrete operational contradiction after
  * the cultural comparison; it cannot award cultural fit or invent live availability.
+ * v8: a venue veto re-tests one bounded mixed plan so unrelated agent improvements are not lost;
+ * equally thin user and agent choices are presented as workable options for a logistics decision.
  */
-export const PARALLEL_VERSION = "parallel:v7";
+export const PARALLEL_VERSION = "parallel:v8";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,

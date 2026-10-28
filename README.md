@@ -28,8 +28,9 @@ Cultural Crash-Test treats those choices as hypotheses. It compares the marketer
 5. The plans are compared anonymously in both presentation orders.
 6. A bounded improvement stage can construct a hybrid, but the complete hybrid must be re-tested before it can compete.
 7. The leading plan is stress-tested against its strongest distinct runner-up.
-8. When Brave Search is configured, official venue sources can veto a concrete operational conflict. Web search cannot award cultural fit or invent a new recommendation.
+8. When Brave Search is configured, official venue sources can veto a concrete operational conflict. If the leading venue fails, the system re-tests one mixed plan that preserves stronger non-venue choices with the checked fallback venue instead of discarding the whole agent plan. Web search cannot award cultural fit or invent live availability.
 9. The result opens with **What changed because of Qloo?**, followed by the finalist comparison and expandable evidence. Stability checks, operational sources, usage details and the decision graph remain behind **View details**.
+10. When the user and agent choices are both only plausible on equally thin evidence, the final table presents both as workable options and tells the marketer to decide using availability, budget, logistics and direct brand fit.
 
 The three displayed columns are finalists, not the entire search space. The result states how many candidates and complete plan combinations the evidence agent examined.
 
@@ -84,7 +85,7 @@ natural-language brief
                                       plain-language final recommendation
 ```
 
-The production engine is `crash:v15 + parallel:v7`, with evidence rubric `evidence:v7` and adjudication protocol `adjudicate:v2`. Models generate proposals, constrained evidence readings and blind comparisons. Code enforces schemas, budgets, screens, constraints, scoring, operational vetoes, evidence ordering and stopping conditions.
+The production engine is `crash:v15 + parallel:v8`, with evidence rubric `evidence:v7` and adjudication protocol `adjudicate:v2`. Models generate proposals, constrained evidence readings and blind comparisons. Code enforces schemas, budgets, screens, constraints, scoring, operational vetoes, bounded mixed-plan salvage, evidence ordering and stopping conditions.
 
 Direct OpenAI calls use the Responses API's native strict JSON Schema Structured Outputs. Zod still validates the returned data, and non-OpenAI/test clients retain the schema-in-prompt fallback.
 

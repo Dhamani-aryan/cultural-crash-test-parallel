@@ -2,13 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   addOperationalClaims,
   applyOperationalGate,
+  operationalSalvageSource,
   operationalVenues,
 } from "@/lib/operational/gate";
-import type {
-  AdjudicationResult,
-  CandidatePlan,
-  EvidenceMatrix,
-} from "@/lib/crashtest/types";
+import type { AdjudicationResult, CandidatePlan, EvidenceMatrix } from "@/lib/crashtest/types";
 import type { VenueOperationalCheck } from "@/lib/operational/types";
 
 const candidate = (candidateId: string, track: CandidatePlan["track"], venue: string) =>
@@ -35,7 +32,11 @@ const final: AdjudicationResult = {
   evidenceOrder: ["agent", "user"],
 };
 
-const check = (venue: string, status: VenueOperationalCheck["status"], finding: string): VenueOperationalCheck => ({
+const check = (
+  venue: string,
+  status: VenueOperationalCheck["status"],
+  finding: string,
+): VenueOperationalCheck => ({
   venue,
   city: "London",
   status,
@@ -60,8 +61,16 @@ describe("operational feasibility gate", () => {
 
   it("vetoes a verified conflict and falls back by the existing evidence order", () => {
     const result = applyOperationalGate(candidates, final, [
-      check("Barbican Conservatory", "verified_fit", "Official hire page supports product launches."),
-      check("For Your Eyes Only", "verified_conflict", "Official site identifies it as a strip club."),
+      check(
+        "Barbican Conservatory",
+        "verified_fit",
+        "Official hire page supports product launches.",
+      ),
+      check(
+        "For Your Eyes Only",
+        "verified_conflict",
+        "Official site identifies it as a strip club.",
+      ),
     ]);
     expect(result.result.winnerCandidateId).toBe("user");
     expect(result.result.eliminated.agent?.[0]).toContain("strip club");
@@ -100,11 +109,9 @@ describe("operational feasibility gate", () => {
       hardFailures: { agent: [] },
       componentStates: { agent: { event_place: "supported" } },
     };
-    addOperationalClaims(
-      matrix,
-      candidates,
-      [check("For Your Eyes Only", "verified_conflict", "Wrong establishment type.")],
-    );
+    addOperationalClaims(matrix, candidates, [
+      check("For Your Eyes Only", "verified_conflict", "Wrong establishment type."),
+    ]);
     expect(matrix.claims).toHaveLength(1);
     expect(matrix.claims[0]).toMatchObject({
       claimId: "agent/event_place/operational",
@@ -112,5 +119,16 @@ describe("operational feasibility gate", () => {
       stance: "contradicts",
     });
     expect(matrix.componentStates.agent.event_place).toBe("rejected");
+  });
+
+  it("identifies a safe mixed-plan source without treating the rejected venue as viable", () => {
+    const source = operationalSalvageSource(candidates, final, [
+      check("Barbican Conservatory", "verified_fit", "Official hire page supports launches."),
+      check("For Your Eyes Only", "verified_conflict", "Official site identifies a strip club."),
+    ]);
+    expect(source?.preliminary.candidateId).toBe("agent");
+    expect(source?.preliminaryVenue.label).toBe("For Your Eyes Only");
+    expect(source?.userVenue.label).toBe("Barbican Conservatory");
+    expect(source?.conflict.status).toBe("verified_conflict");
   });
 });
