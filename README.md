@@ -139,7 +139,7 @@ npm run lint
 npm run build
 ```
 
-Public release audit updated on 26 October 2026: **35 test files and 315 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
+Public release audit updated on 28 October 2026: **35 test files and 316 tests passed**, followed by TypeScript, ESLint and a production Next.js build. Tests use a synthetic Qloo world and require no API keys.
 
 ## Repository map
 
