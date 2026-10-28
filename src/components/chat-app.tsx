@@ -455,6 +455,7 @@ export function ChatApp() {
   const chats = useSyncExternalStore(subscribeChats, getChats, getServerChats);
   const [pending, setPending] = useState<string | null>(null);
   const [sidebar, setSidebar] = useState(false);
+  const [correctingBrief, setCorrectingBrief] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const s = intake.state;
   const view = crash.view;
@@ -501,22 +502,26 @@ export function ChatApp() {
     setPending(text);
     const reply = await intake.send(text);
     setPending(null);
+    setCorrectingBrief(false);
     await handle(reply);
   };
   const chip = async (c: Chip) => {
     setPending(c.label);
     const reply = await intake.chip(c);
     setPending(null);
+    setCorrectingBrief(false);
     await handle(reply);
   };
   const newChat = () => {
     crash.reset();
     intake.reset();
+    setCorrectingBrief(false);
     setSidebar(false);
   };
   const openChat = (c: SavedChat) => {
     intake.setState(c.intake);
     crash.restore(c.result, c.clarification ?? []);
+    setCorrectingBrief(false);
     setSidebar(false);
   };
   const deleteChat = (id: string) => {
@@ -526,6 +531,7 @@ export function ChatApp() {
   const loadJudgeExample = () => {
     crash.reset();
     setPending(null);
+    setCorrectingBrief(false);
     intake.setState(
       intakeFromBrief(JUDGE_EXAMPLE_BRIEF, JUDGE_EXAMPLE_TEXT, `judge-${Date.now()}`),
     );
@@ -654,6 +660,15 @@ export function ChatApp() {
                               {c.label}
                             </button>
                           ))}
+                          {s!.chips.some((c) => c.action === "confirm") && (
+                            <button
+                              type="button"
+                              onClick={() => setCorrectingBrief(true)}
+                              className="rounded-lg border border-line bg-panel px-3.5 py-2 text-sm text-ink-2 transition-colors hover:border-ink/30 hover:text-ink"
+                            >
+                              Edit brief
+                            </button>
+                          )}
                         </div>
                       )}
                   </div>
@@ -754,7 +769,21 @@ export function ChatApp() {
                       autoFocus
                     />
                   ) : (
-                    <Composer key="brief" onSend={send} busy={busy} />
+                    <>
+                      {correctingBrief && (
+                        <p className="mb-2 text-xs text-muted">
+                          Tell us what to change—for example, “Keep the venue fixed and change the
+                          audience to 25–35-year-old fragrance buyers.”
+                        </p>
+                      )}
+                      <Composer
+                        key={correctingBrief ? "brief-correction" : "brief"}
+                        onSend={send}
+                        busy={busy}
+                        placeholder={correctingBrief ? "Describe the correction…" : PLACEHOLDER}
+                        autoFocus={correctingBrief}
+                      />
+                    </>
                   )}
                 </div>
               </div>

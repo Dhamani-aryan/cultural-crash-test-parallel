@@ -158,10 +158,30 @@ export function respond(
     ? "I can't open websites here, so I haven't read that one. Paste any About, product or campaign copy that helps. "
     : "";
   if (!s.missingCriticalFields.length) {
-    // A complete brief runs: the summary is for transparency, and the clarification gate is the only
-    // further check (it asks only what the user alone can answer).
-    s = say(s, "assistant", `${prefix}${summaryText(s)}\n\n${READY_LINE}`);
-    return refresh({ ...s, confirmed: true, chips: [] });
+    if (
+      !s.brief.brandAttributes.length &&
+      !s.brief.otherRules.length &&
+      !s.assumptions.includes("the brand's character comes from the campaign details provided.")
+    )
+      s = {
+        ...s,
+        assumptions: [
+          ...s.assumptions,
+          "the brand's character comes from the campaign details provided.",
+        ].slice(0, 12),
+      };
+    // Every complete brief stops at the same review point. The user explicitly starts the costly
+    // run after reading the extracted fields, and can correct the brief in ordinary language first.
+    s = say(
+      s,
+      "assistant",
+      `${prefix}${summaryText(s)}\n\nReview the brief, correct anything that needs changing, then generate the recommendations.`,
+    );
+    return refresh({
+      ...s,
+      confirmed: false,
+      chips: [{ label: "Generate recommendations", action: "confirm" }],
+    });
   }
   if (s.clarificationTurns >= MAX_CLARIFICATION_TURNS) {
     s = say(
@@ -216,10 +236,9 @@ async function fillTheRest(llm: LlmClient, state: IntakeState): Promise<IntakeSt
   };
 }
 
-/** A reply that starts the run exactly when the assistant has just said the brief is complete. */
+/** Intake replies never start implicitly; only the explicit confirm action starts the run. */
 const replied = (state: IntakeState): IntakeReply => {
-  const last = state.messages.at(-1);
-  return { state, startRequested: state.readyToRun && last?.role === "assistant" && last.text.endsWith(READY_LINE) };
+  return { state, startRequested: false };
 };
 
 export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise<IntakeReply> {
@@ -240,8 +259,7 @@ export async function applyIntake(llm: LlmClient, input: IntakeRequest): Promise
 
     case "confirm": {
       state = refresh(state);
-      if (state.missingCriticalFields.length)
-        return replied(respond(state));
+      if (state.missingCriticalFields.length) return replied(respond(state));
       // The summary the user just saw is the review; confirming starts the run.
       state = refresh({ ...state, confirmed: true });
       return {

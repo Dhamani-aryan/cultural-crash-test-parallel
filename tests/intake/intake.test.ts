@@ -66,18 +66,20 @@ const lastAssistant = (s: IntakeState) =>
   [...s.messages].reverse().find((m) => m.role === "assistant")!.text;
 
 describe("intake", () => {
-  it("turns a complete description into a summary and starts the run, without a second confirmation (P2.1)", async () => {
+  it("turns every complete description into a review with an explicit generate action", async () => {
     const { llm } = fakeLlm(fullFacts);
     const r1 = await applyIntake(llm, { action: "message", message: FULL, marketId: "london" });
     expect(r1.state.missingCriticalFields).toEqual([]);
-    expect(r1.state.readyToRun).toBe(true);
-    expect(r1.startRequested).toBe(true);
-    expect(lastAssistant(r1.state)).toMatch(/^Here’s the brief I’ll test:[\s\S]*I have enough to test the plan\.$/);
-    expect(lastAssistant(r1.state)).not.toMatch(/Confirm the brief|Brief locked/);
-    expect(r1.state.chips).toEqual([]);
-    // An explicit confirm (an example brief's chip) still starts it, with the same neutral words.
+    expect(r1.state.readyToRun).toBe(false);
+    expect(r1.startRequested).toBe(false);
+    expect(lastAssistant(r1.state)).toMatch(
+      /^Here’s the brief I’ll test:[\s\S]*Review the brief, correct anything that needs changing, then generate the recommendations\.$/,
+    );
+    expect(r1.state.chips).toEqual([{ label: "Generate recommendations", action: "confirm" }]);
+    // The costly run begins only after the explicit Generate recommendations action.
     const r2 = await applyIntake(llm, { action: "confirm", state: r1.state });
     expect(r2.startRequested).toBe(true);
+    expect(r2.state.readyToRun).toBe(true);
     expect(lastAssistant(r2.state)).toBe("I have enough to test the plan.");
   });
 
@@ -90,13 +92,39 @@ describe("intake", () => {
       message: "A sneaker pop-up in London",
       marketId: "london",
     });
-    expect(r.state.missingCriticalFields).toEqual(["audience", "brandContext"]);
+    expect(r.state.missingCriticalFields).toEqual(["audience"]);
     const text = lastAssistant(r.state);
     expect(text).toMatch(/Who is it for/);
-    expect(text).toMatch(/stand for/);
+    expect(text).not.toMatch(/stand for/);
     expect(text).not.toMatch(/What kind of launch/);
     expect(text).not.toMatch(/Which city/);
     expect(r.state.chips.some((c) => c.action === "explore_audience")).toBe(true);
+  });
+
+  it("reviews a usable brief without forcing a separate brand-values question", async () => {
+    const { llm } = fakeLlm({
+      usable: {
+        productCategory: "Fragrance",
+        launchGoal: "Paris pop-up",
+        cityText: "Paris",
+        audienceDescription: "Design-conscious fragrance buyers",
+        choices: [{ slot: "artist_music", name: "Bonobo", locked: false }],
+      },
+    });
+    const result = await applyIntake(llm, {
+      action: "message",
+      message: "usable",
+      marketId: "paris",
+    });
+    expect(result.state.missingCriticalFields).toEqual([]);
+    expect(result.startRequested).toBe(false);
+    expect(result.state.chips).toContainEqual({
+      label: "Generate recommendations",
+      action: "confirm",
+    });
+    expect(lastAssistant(result.state)).toContain(
+      "I assumed: the brand's character comes from the campaign details provided",
+    );
   });
 
   it("merges a later answer without erasing earlier facts", async () => {
@@ -390,8 +418,12 @@ describe("intake", () => {
       patch: { exploreUserChoices: false },
       state: r.state,
     });
-    // An edit that leaves the brief complete summarises it again and runs it (P2.1: no second confirmation).
-    expect(off.startRequested).toBe(true);
+    // An edit returns to the same review step instead of starting an expensive run implicitly.
+    expect(off.startRequested).toBe(false);
+    expect(off.state.chips).toContainEqual({
+      label: "Generate recommendations",
+      action: "confirm",
+    });
     expect(LaunchBriefSchema.parse(toLaunchBrief(off.state)).exploreUserChoices).toBe(false);
   });
 

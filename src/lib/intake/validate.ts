@@ -71,9 +71,9 @@ export function missingFields(
   if (b.launchGoal.trim().length < 2) missing.push("launchGoal");
   if (!marketById(b.marketId)) missing.push("marketId");
   if (!audienceConfirmed(state)) missing.push("audience");
-  // A positioning rule ("not another celebrity launch", "keep it local") is usable brand
-  // context even when the extractor did not repeat it as an attribute.
-  if (!b.brandAttributes.length && !b.otherRules.length) missing.push("brandContext");
+  // Brand character improves the analysis but is not a reason to trap a usable campaign brief in
+  // intake. When it is absent, the review records a transparent assumption and lets the user edit
+  // it before generating recommendations.
   return missing;
 }
 
