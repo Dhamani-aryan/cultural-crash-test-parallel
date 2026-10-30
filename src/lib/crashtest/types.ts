@@ -668,8 +668,8 @@ export interface PoolRecord {
   screens: {
     role: string;
     locality: string;
-    /** Fit to a neighbourhood the brief names, when it names one. */ hood?:
-      "near" | "outside" | "far" | "unknown";
+    /** Fit to a neighbourhood the brief names, when it names one: Qloo files it there (in), within 2 km (near), 2–6 km (outside), beyond (far). */ hood?:
+      "in" | "near" | "outside" | "far" | "unknown";
     brief: string;
     distinct: string;
     central: string;

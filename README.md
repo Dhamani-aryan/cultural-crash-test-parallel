@@ -85,7 +85,7 @@ natural-language brief
                                       plain-language final recommendation
 ```
 
-The production engine is `crash:v15 + parallel:v11`, with evidence rubric `evidence:v7` and adjudication protocol `adjudicate:v2`. Models generate proposals, constrained evidence readings and blind comparisons. Code enforces schemas, budgets, screens, constraints, scoring, operational vetoes, bounded mixed-plan salvage, evidence ordering and stopping conditions.
+The production engine is `crash:v15 + parallel:v12`, with evidence rubric `evidence:v7` and adjudication protocol `adjudicate:v2`. Models generate proposals, constrained evidence readings and blind comparisons. Code enforces schemas, budgets, screens, constraints, scoring, operational vetoes, bounded mixed-plan salvage, evidence ordering and stopping conditions.
 
 Direct OpenAI calls use the Responses API's native strict JSON Schema Structured Outputs. Zod still validates the returned data, and non-OpenAI/test clients retain the schema-in-prompt fallback.
 

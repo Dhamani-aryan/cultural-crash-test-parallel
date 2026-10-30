@@ -137,6 +137,28 @@ describe("screens:v4: selection", () => {
     expect(selectionFlags(locked, (c) => by[c.label], indie)).toMatchObject({ intent: 0, role: 0, guard: null });
   });
 
+  it("ranks a venue filed in the named area above a near one, and closeness above a soft host doubt (parallel:v12)", () => {
+    const hood = contractOf({ sourceText: "A pop-up in Le Marais." });
+    hood.neighborhoods = [{ value: "Le Marais", quote: "in Le Marais" } as never];
+    const plan = (label: string) => ({ anchors: [], components: [comp("event_place", label, 0.8)] });
+    const by: Record<string, PoolRecord["screens"]> = {
+      Inside: screens({ hood: "in", role: "doubtful", notes: ["host: possible", "Qloo places it in Le Marais"] }),
+      Nearby: screens({ hood: "near", notes: ["host: preferred", "Qloo files it in Popincourt"] }),
+      Across: screens({ hood: "outside", notes: ["host: preferred"] }),
+    };
+    const flags = (label: string) => selectionFlags(plan(label), (c) => by[c.label], hood);
+    expect(flags("Inside").area).toBe(0);
+    expect(flags("Nearby")).toMatchObject({ area: 0.5, notes: [{ why: "Qloo files it in Popincourt, not Le Marais" }] });
+    expect(flags("Across").area).toBe(1);
+    const ev = [0, 0, 1, 0, 0, 1, 1, 1, 1];
+    // The well-typed host across town or next door loses to the possible host in the named area.
+    expect(compareVectors(agentKey(ev, flags("Inside")), agentKey(ev, flags("Nearby")))).toBeGreaterThan(0);
+    expect(compareVectors(agentKey(ev, flags("Nearby")), agentKey(ev, flags("Across")))).toBeGreaterThan(0);
+    // A venue the user named is never counted against the plan.
+    const user = { anchors: [], components: [{ ...comp("event_place", "Across", 0.8), origin: "user_provided" as const }] };
+    expect(selectionFlags(user, (c) => by[c.label], hood).area).toBe(0);
+  });
+
   it("flags an agent choice that matches a quality the brief explicitly avoids", () => {
     const plan = { anchors: [], components: [comp("brand_collaboration", "Beach Brand", 0.8)] };
     const flagged = screens({ brief: "flag", notes: ["avoided: beach-party aesthetic"] });

@@ -72,7 +72,7 @@ export interface Proxy {
   named: number;
   roleBad: number;
   briefBad: number;
-  /** In (+1), outside (-0.5) or far from (-1) a neighbourhood the brief names: brief fit, ranked above affinity. */
+  /** Filed in (+1), near (+0.5), outside (-0.5) or far from (-1) a neighbourhood the brief names: brief fit, ranked above affinity. */
   hood: number;
   /** Role doubts and centrality flags, net of the user's stated preference for it. */
   doubt: number;
@@ -313,7 +313,7 @@ function proxyOf(c: Omit<PoolCandidate, "proxy">, strength: "locked" | "preferre
     named: c.source === "user" && strength === "preferred" && !cantDoJob(s) ? 1 : 0,
     roleBad: s.role === "fail" ? 1 : 0,
     briefBad: s.brief === "fail" ? 1 : s.brief === "flag" ? 0.5 : 0,
-    hood: s.hood === "near" ? 1 : s.hood === "outside" ? -0.5 : s.hood === "far" ? -1 : 0,
+    hood: s.hood === "in" ? 1 : s.hood === "near" ? 0.5 : s.hood === "outside" ? -0.5 : s.hood === "far" ? -1 : 0,
     doubt: (s.role === "doubtful" ? 1 : 0) + (s.central === "flag" ? 0.5 : 0) - (strength === "preferred" ? 0.5 : strength === "considered" ? 0.25 : 0),
     weakAudience: rank === undefined ? 1 : 0,
     audience: rank === undefined ? 0 : Math.max(0, 1 - (rank - 1) / VIEW_SIZE),
@@ -360,11 +360,13 @@ async function screenEntity(
   let hood: PoolRecord["screens"]["hood"];
   if (slot === "event_place") {
     const n = neighborhoodFit(e, input.neighborhood, contract.neighborhoods[0]?.value);
-    hood = n.fit;
+    // Filed under the named neighbourhood beats merely being close to its centre (parallel:v12).
+    hood = n.named ? "in" : n.fit;
     // Outside a neighbourhood the brief names is never local, whatever the city list says.
     if (n.fit === "near") local = "pass";
     if (n.fit === "far" || n.fit === "outside") local = "flag";
     if (n.named) notes.push(`Qloo places it in ${contract.neighborhoods[0]?.value}`);
+    else if (e.geocode?.neighborhood && contract.neighborhoods[0]) notes.push(`Qloo files it in ${e.geocode.neighborhood}`);
     if (n.km !== null) notes.push(`${n.km.toFixed(1)} km from ${contract.neighborhoods[0]?.value}`);
   }
   const ruled = fitsBrief(e, brief, { requireAttributes: false });
@@ -647,6 +649,7 @@ export function weakestSlot(c: CandidatePlan, m: EvidenceMatrix, locked: Set<Slo
 export function selectionFlags(plan: CulturalPlan, screensOf: (c: Component) => PoolRecord["screens"] | undefined, contract: IntentContract): SelectionFlags {
   const notes: SelectionFlags["notes"] = [];
   let role = 0;
+  let area = 0;
   let intent = 0;
   let prestige = 0;
   let local = 0;
@@ -673,15 +676,23 @@ export function selectionFlags(plan: CulturalPlan, screensOf: (c: Component) => 
       intent += 1;
       notes.push({ slot: c.slot, label: c.label, why: `outside ${contract.neighborhoods[0]?.value ?? "the neighbourhood the brief names"}` });
     }
+    // How far from the named area: a venue Qloo files there, then one near its centre, then the rest.
+    if (!user && s.hood && s.hood !== "in") area += s.hood === "far" ? 2 : s.hood === "outside" ? 1 : 0.5;
+    if (!user && s.hood === "near") {
+      const filed = s.notes.find((n) => n.startsWith("Qloo files it in "));
+      if (filed) notes.push({ slot: c.slot, label: c.label, why: `${filed}, not ${contract.neighborhoods[0]?.value ?? "the neighbourhood the brief names"}` });
+    }
     if (!user && (c.entity?.popularity ?? 0) >= PRESTIGE) prestige++;
-    if (s.locality === "pass" || s.hood === "near") local++;
+    if (s.locality === "pass" || s.hood === "near" || s.hood === "in") local++;
   }
   const guard = prestige >= 2 ? "two or more global prestige defaults" : prestige === 1 && local === 0 ? "a global prestige default and nothing local" : null;
-  return { role, intent, guard, notes };
+  return { role, area, intent, guard, notes };
 }
 
 export interface SelectionFlags {
   role: number;
+  /** Distance from the neighbourhood the brief names, for the venues the agent filled (0 when filed in it). */
+  area?: number;
   intent: number;
   guard: string | null;
   notes: { slot: Slot; label: string; why: string }[];
@@ -690,11 +701,13 @@ export interface SelectionFlags {
 /**
  * The agent's selection order, aligned with the final judge's first priority (parallel:v9): the
  * evidence vector's hard rules and locks, then keeping the choices the brief names (`named`, see
- * namedScore), then completeness, its own role screen, the whole-plan guard and the brief's
- * distinctiveness and neighbourhood intent, then the rest of the evidence vector (coverage last).
+ * namedScore), then completeness, how close its venue is to the neighbourhood the brief names
+ * (parallel:v12: filed there, then near, then outside, ahead of soft host doubts), its own role
+ * screen, the whole-plan guard and the brief's distinctiveness and neighbourhood intent, then the
+ * rest of the evidence vector (coverage last).
  */
 export function agentKey(ev: number[], f: SelectionFlags, named = 0): number[] {
-  return [...ev.slice(0, 2), named, ev[2], -f.role, f.guard ? -1 : 0, -f.intent, ...ev.slice(3)];
+  return [...ev.slice(0, 2), named, ev[2], -(f.area ?? 0), -f.role, f.guard ? -1 : 0, -f.intent, ...ev.slice(3)];
 }
 
 /**

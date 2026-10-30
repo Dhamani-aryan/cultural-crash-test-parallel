@@ -53,8 +53,12 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * v11: before committing, the agent runs the same cited web fit check on its own top venues and may
  * move to another of its tested plans that is equally strong on rules, locks, named choices and
  * completeness, with fewer cited venue concerns. It never leaves a venue the user named.
+ * v12: when the brief names a neighbourhood, the agent ranks a venue Qloo files under it above one
+ * that is only within 2 km of its centre, and both above venues further out; that closeness counts
+ * before soft host doubts when it picks among its plans, so a better-typed venue across town no
+ * longer beats one in the named area.
  */
-export const PARALLEL_VERSION = "parallel:v11";
+export const PARALLEL_VERSION = "parallel:v12";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
