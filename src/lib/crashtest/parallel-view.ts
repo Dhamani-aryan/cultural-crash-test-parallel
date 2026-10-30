@@ -1,3 +1,4 @@
+import type { OperationalAudit } from "@/lib/operational/types";
 import {
   COMPONENT_STATE_LABEL,
   EVIDENCE_DIMENSION_LABEL,
@@ -125,6 +126,63 @@ export interface ParallelView {
 }
 
 const TRACK_LETTER = { user: "U", llm: "L", agent: "A", hybrid: "H" } as const;
+const PICKED_BY = {
+  user: "Your plan",
+  llm: "The LLM",
+  agent: "The evidence agent",
+  search: "A later targeted search",
+} as const;
+
+/**
+ * What a venue veto means, in one plain account: who picked the venue, what Qloo listed it as, what
+ * the official source showed, and whose error it was. A wrong kind of place or a closed one means
+ * Qloo's record was wrong or out of date, not the reasoning that used it; a capacity or format
+ * limit is a practical fact Qloo's taste data doesn't cover.
+ */
+export function vetoAccount(override: NonNullable<OperationalAudit["override"]>): string {
+  const who = override.fromSource ? PICKED_BY[override.fromSource] : "The cultural comparison";
+  const listed = override.fromQlooCategory ? `, which Qloo lists as ${/^[aeiou]/i.test(override.fromQlooCategory) ? "an" : "a"} ${override.fromQlooCategory}` : "";
+  const finding = override.reason.replace(/^.*?failed the operational check:\s*/i, "").replace(/\s+No operationally viable alternative was established\.?$/i, "").trim();
+  const whose =
+    override.kind === "wrong_establishment"
+      ? `So Qloo's record of ${override.fromVenue} is inaccurate: the error is in Qloo's data, not in how the plan was chosen.`
+      : override.kind === "closed"
+        ? `So Qloo's record of ${override.fromVenue} is out of date: the error is in Qloo's data, not in how the plan was chosen.`
+        : override.kind
+          ? "This is a practical limit that Qloo's taste data doesn't cover."
+          : "";
+  const next = override.toVenue ? `The plan now uses ${override.toVenue}.` : "No other venue passed the check, so the venue is left open.";
+  return [`${who} picked ${override.fromVenue}${listed}.`, `The web check of its official source found: ${finding}`, whose, next].filter(Boolean).join(" ");
+}
+
+const BY = { user: "you", llm: "the LLM", agent: "the evidence agent", search: "a later targeted search" } as const;
+
+/** Why the web facts moved the recommendation to another finalist's venue, in one plain account. */
+export function preferenceAccount(p: NonNullable<OperationalAudit["preference"]>): string {
+  const from = p.fromSource ? ` (picked by ${BY[p.fromSource]})` : "";
+  const to = p.toSource ? ` (picked by ${BY[p.toSource]})` : "";
+  return [
+    `${p.fromVenue}${from} led the Qloo comparison, but cited web sources show it is ${p.concerns.join(" and ")}.`,
+    p.note,
+    `${p.toVenue}${to} keeps the same named choices without that problem, so the plan uses ${p.toVenue}.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Which entity (or label) fills each slot, and which slots are open: two plans with the same choices. */
+const choicesOf = (c: CandidatePlan) =>
+  c.plan.components
+    .map((x) => `${x.slot}=${x.entity?.id ?? x.label.toLowerCase()}`)
+    .sort()
+    .join(";");
+
+/** The evidence agent independently reached exactly the recommended plan. */
+const agentAgrees = (p: ParallelResult, F: CandidatePlan) => {
+  const agent = p.candidates.find((c) => c.candidateId === "agent");
+  return !!agent && choicesOf(agent) === choicesOf(F);
+};
+
 const WINNER_TEXT = {
   user: "Your plan",
   llm: "The LLM’s plan",
@@ -280,7 +338,11 @@ export function parallelView(state: RunState): ParallelView | null {
     semanticContradictions.length > 0 ||
     (v.provisional ?? (!!F && v.decidedBy === "evidence_order"));
   const summary: SummaryView = {
-    winner: F ? WINNER_TEXT[F.track] : "No recommendation",
+    winner: F
+      ? F.track !== "agent" && agentAgrees(p, F)
+        ? `${WINNER_TEXT[F.track]}, matched by the evidence-first agent`
+        : WINNER_TEXT[F.track]
+      : "No recommendation",
     winnerTrack: F ? TRACK_LETTER[F.track] : null,
     verdict: VERDICT_TEXT[v.verdict],
     stable: v.stable && !evidenceInsufficient && semanticContradictions.length === 0,
@@ -481,13 +543,24 @@ export function toParallelMarkdown(state: RunState): string {
           ...p.stability.checks.map((c) => `- ${c.label}: ${c.outcome}. ${c.detail}`),
         ]
       : []),
+    ...(p.agent?.webCheck?.moved
+      ? [
+          "",
+          `**The agent's own web check:** cited sources show ${p.agent.webCheck.moved.fromVenue} is ${p.agent.webCheck.moved.concerns.join(" and ")}, so the agent chose ${p.agent.webCheck.moved.toVenue} instead.`,
+        ]
+      : []),
     ...(p.operational
       ? [
           "",
           "## Operational verification",
           ...(p.operational.override
             ? [
-                `- The cultural comparison recommended ${p.operational.override.fromVenue}; the operational check found: ${p.operational.override.reason} Final course: ${p.operational.override.toVenue ?? "no venue established"}.`,
+                `- **Changed by the web check:** ${vetoAccount(p.operational.override)}${p.operational.override.sourceUrl ? ` ([official source](${p.operational.override.sourceUrl}))` : ""}`,
+              ]
+            : []),
+          ...(p.operational.preference
+            ? [
+                `- **Changed by the web check:** ${preferenceAccount(p.operational.preference)}${p.operational.preference.sourceUrl ? ` ([source](${p.operational.preference.sourceUrl}))` : ""}`,
               ]
             : []),
           ...p.operational.checks.flatMap((check) => [

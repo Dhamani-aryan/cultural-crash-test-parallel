@@ -51,12 +51,20 @@ function say(state: IntakeState, role: "user" | "assistant", text: string): Inta
   return { ...state, messages: [...state.messages, msg] };
 }
 
-const cityChips = (): Chip[] =>
-  TARGET_MARKETS.map((m) => ({
-    label: m.label,
-    action: "update_brief" as const,
-    patch: { marketId: m.id, cityText: "" },
-  }));
+/** Every supported city, the one the brief itself names first (when it names exactly one). */
+const cityChips = (sourceText = ""): Chip[] => {
+  const named = marketsFromText(sourceText);
+  const first = named.length === 1 ? named[0] : null;
+  return [...TARGET_MARKETS]
+    .sort((a, b) => Number(b.id === first) - Number(a.id === first))
+    .map((m) => ({ label: m.label, action: "update_brief" as const, patch: { marketId: m.id, cityText: "" } }));
+};
+
+/** "Is the launch in London?" when the brief names exactly one supported city beside an unsupported one. */
+const suggestedCity = (sourceText = "") => {
+  const named = marketsFromText(sourceText);
+  return named.length === 1 ? ` Is the launch in ${marketById(named[0])!.label}?` : "";
+};
 
 /** The questions for what's missing, in a fixed order, at most three. */
 export function questionsFor(state: IntakeState): {
@@ -65,6 +73,8 @@ export function questionsFor(state: IntakeState): {
   asks: CriticalField[];
 } {
   const b = state.brief;
+  // What the user wrote, so a question can suggest the one supported city they named.
+  const said = state.messages.filter((m) => m.role === "user").map((m) => m.text).join(" ");
   const lines: string[] = [];
   const chips: Chip[] = [];
   const asks: CriticalField[] = [];
@@ -88,17 +98,17 @@ export function questionsFor(state: IntakeState): {
         );
       } else {
         lines.push(
-          `You mention ${b.cityText}, which isn't one of the cities with deep enough Qloo data yet. Pick one of ${TARGET_MARKETS.map((m) => m.label).join(", ")}.`,
+          `You mention ${b.cityText}, which isn't one of the cities with deep enough Qloo data yet.${suggestedCity(said)} Pick one of ${TARGET_MARKETS.map((m) => m.label).join(", ")}.`,
         );
-        chips.push(...cityChips());
+        chips.push(...cityChips(said));
       }
     } else if (f === "marketId") {
       lines.push(
         b.cityText && !marketFromText(b.cityText)
-          ? `You mention ${b.cityText}, which isn't one of the cities with deep enough Qloo data yet. Pick one of ${TARGET_MARKETS.map((m) => m.label).join(", ")}.`
+          ? `You mention ${b.cityText}, which isn't one of the cities with deep enough Qloo data yet.${suggestedCity(said)} Pick one of ${TARGET_MARKETS.map((m) => m.label).join(", ")}.`
           : `Which city is the launch in? Supported: ${TARGET_MARKETS.map((m) => m.label).join(", ")}.`,
       );
-      chips.push(...cityChips());
+      chips.push(...cityChips(said));
     } else if (f === "productCategory") {
       lines.push("What are you launching: the product or category?");
     } else if (f === "launchGoal") {

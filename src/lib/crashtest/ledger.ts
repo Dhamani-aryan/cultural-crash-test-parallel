@@ -89,6 +89,7 @@ export function sanitizeInsights(input: InsightsInput): Record<string, unknown> 
     "filter.results.entities": input.resultEntities,
     "filter.exclude.entities": input.excludeEntities,
     "feature.explainability": input.explainability,
+    ...input.extraParams,
     take: input.take,
   };
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));

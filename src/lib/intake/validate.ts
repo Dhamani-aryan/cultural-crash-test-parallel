@@ -20,7 +20,10 @@ export function marketFromText(cityText: string): string | null {
       k.includes(nameKey(x.label)) ||
       (x.locationAliases ?? []).some((alias) => nameKey(alias) === k),
   );
-  return m?.id ?? null;
+  if (m) return m.id;
+  // "Bushwick, Brooklyn": a district with a known area of exactly one supported city in it.
+  const within = marketsFromText(cityText);
+  return within.length === 1 ? within[0] : null;
 }
 
 /** All supported markets named in a longer message. Used only when exactly one is unambiguous. */

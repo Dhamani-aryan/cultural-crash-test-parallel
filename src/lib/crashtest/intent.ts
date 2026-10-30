@@ -8,7 +8,7 @@ import type { LaunchBrief, Slot } from "./types";
  * brief field and the exact phrase it came from; nothing is inferred from world knowledge, and a
  * quality the brief doesn't state is simply absent.
  */
-export const CONTRACT_VERSION = "contract:v1";
+export const CONTRACT_VERSION = "contract:v2";
 
 export type BriefField = "sourceText" | "launchGoal" | "audienceDescription" | "productCategory" | "brandAttributes" | "existingChoices" | "constraints" | "audienceAnchors" | "budgetBand" | "marketId";
 
@@ -41,6 +41,8 @@ export interface IntentContract {
   version: string;
   city: Cited;
   neighborhoods: Cited[];
+  /** Places the brief only puts something "in" or "on": neighbourhoods once Qloo confirms them as localities of this city (contract:v2). */
+  placeMentions?: Cited[];
   anchors: { names: string[]; source: "user" | "model_hypothesis" | "none" };
   product: Cited;
   attributes: Cited[];
@@ -121,6 +123,7 @@ export function compileIntent(brief: LaunchBrief, market: Market, anchors: Inten
 
   // Neighbourhoods: the market's known districts, and capitalised places the brief puts the launch in.
   const neighborhoods: Cited[] = [];
+  const placeMentions: Cited[] = [];
   const seen = new Set<string>();
   const notPlaces = new Set([market.label, market.qlooLocation, market.country, ...brief.existingChoices.map((c) => c.name), brief.brandName ?? ""].map((s) => s.toLowerCase()));
   for (const [field, text] of fields) {
@@ -135,9 +138,11 @@ export function compileIntent(brief: LaunchBrief, market: Market, anchors: Inten
       const place = m[1];
       if (notPlaces.has(place.toLowerCase()) || seen.has(place.toLowerCase())) continue;
       // Only a place word the brief itself marks as a location: "the Juárez neighborhood", or "around Bondi".
-      if (!m[2] && !/^(around|near|on)\b/i.test(m[0]) && !(market.locationAliases ?? []).some((a) => a.toLowerCase() === place.toLowerCase())) continue;
+      // A bare "in Bushwick" or "on Brick Lane" is one only once Qloo confirms it (confirmNeighborhoods).
       seen.add(place.toLowerCase());
-      neighborhoods.push(cite(place, field, m[0].trim()));
+      if (!m[2] && !/^(around|near)\b/i.test(m[0]) && !(market.locationAliases ?? []).some((a) => a.toLowerCase() === place.toLowerCase()))
+        placeMentions.push(cite(place, field, m[0].trim()));
+      else neighborhoods.push(cite(place, field, m[0].trim()));
     }
   }
 
@@ -199,6 +204,7 @@ export function compileIntent(brief: LaunchBrief, market: Market, anchors: Inten
     version: CONTRACT_VERSION,
     city: cite(market.label, "marketId", brief.marketId),
     neighborhoods,
+    placeMentions,
     anchors,
     product: cite(brief.productCategory, "productCategory", brief.productCategory),
     attributes: brief.brandAttributes.map((a) => cite(a, "brandAttributes", a)),

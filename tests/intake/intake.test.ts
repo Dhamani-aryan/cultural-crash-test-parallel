@@ -465,3 +465,28 @@ describe("intake", () => {
     expect(calls).toEqual(["You read one message from some"]);
   });
 });
+
+describe("marketFromText", () => {
+  it("maps a district inside one supported city's known area to that city", async () => {
+    const { marketFromText } = await import("@/lib/intake/validate");
+    expect(marketFromText("Bushwick, Brooklyn")).toBe("new-york");
+    expect(marketFromText("London")).toBe("london");
+    expect(marketFromText("Bristol")).toBeNull();
+  });
+});
+
+describe("an unsupported city beside a supported one", () => {
+  it("suggests the one supported city the brief names, first", async () => {
+    const { questionsFor, newIntake } = await import("@/lib/intake/state");
+    const base = newIntake();
+    const state = {
+      ...base,
+      brief: { ...base.brief, cityText: "Bristol" },
+      messages: [{ id: "u1", role: "user" as const, text: "We're a Bristol roaster opening our first London café in Hackney.", createdAt: "2026-10-30T00:00:00.000Z" }],
+      missingCriticalFields: ["marketId" as const],
+    };
+    const q = questionsFor(state);
+    expect(q.lines[0]).toContain("Is the launch in London?");
+    expect(q.chips[0].label).toBe("London");
+  });
+});

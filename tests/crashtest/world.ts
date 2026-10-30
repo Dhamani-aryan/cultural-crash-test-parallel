@@ -170,6 +170,8 @@ export function worldLlm(
     clarify?: unknown;
     /** The structured role check's reading of a candidate, by label (default: fits, keeps the product central). */
     roles?: Record<string, { verdict: "fits" | "doubtful" | "wrong"; central?: boolean; reason?: string }>;
+    /** The agent's own proposals for an open slot, by the job named in the prompt ("venue", "music act", "brand"); default none. */
+    agentProposals?: Partial<Record<"venue" | "music act" | "brand", string[]>>;
   } = {},
 ) {
   const prompts: string[] = [];
@@ -233,6 +235,10 @@ export function worldLlm(
       }
       if (system.startsWith("Revise a launch's creative direction") || system.startsWith("Write a launch's creative direction"))
         return reply({ tags: ["Industrial"], direction: "Industrial", reason: "Top here.", expectedEffect: "Supported." });
+      if (system.startsWith("You suggest candidates for one job")) {
+        const job = prompt.match(/Job: (?:the |an external )?(venue|music act|brand)/)?.[1] as "venue" | "music act" | "brand" | undefined;
+        return reply({ names: (job && over.agentProposals?.[job]) ?? [] });
+      }
       if (system.startsWith("You screen candidates for one job")) {
         // Every candidate fits unless the test reads it otherwise; ids are copied from the prompt.
         return reply({
@@ -294,6 +300,11 @@ export function withExtras(client: QlooClient, extras: QlooEntity[], places: Rec
     async getInsights(input) {
       const loc = input.signalLocationQuery ?? input.filterLocationQuery ?? "";
       if (places[loc]) return result(places[loc]);
+      // A point-and-radius query is answered with the neighbourhood's own list ("Shoreditch, London").
+      if (input.extraParams?.["filter.location"]) {
+        const hood = Object.keys(places).find((k) => k.includes(", "));
+        if (hood) return result(places[hood]);
+      }
       const base = await client.getInsights(input);
       if (input.resultEntities) {
         const own = extras.filter((e) => input.resultEntities!.includes(e.id));

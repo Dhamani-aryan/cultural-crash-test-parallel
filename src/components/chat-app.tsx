@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { EvidenceRecord, LaunchBriefInput } from "@/lib/crashtest/types";
 import { MAX_MESSAGE, type Chip } from "@/lib/intake/types";
 import { intakeFromBrief } from "@/lib/intake/validate";
+import { TARGET_MARKETS } from "@/lib/markets";
 import {
   chatTitle,
   getChats,
@@ -604,6 +605,27 @@ export function ChatApp() {
                 <span>02 · Test</span>
                 <span>03 · Decision review</span>
               </div>
+              <section aria-labelledby="supported-cities" className="mt-7">
+                <h2
+                  id="supported-cities"
+                  className="font-mono text-[10px] uppercase tracking-[0.12em] text-accent"
+                >
+                  Cities with the most reliable Qloo data
+                </h2>
+                <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                  {TARGET_MARKETS.map((m) => (
+                    <li
+                      key={m.id}
+                      className="rounded-full border border-line bg-panel px-2.5 py-1 text-[13px] text-ink-2"
+                    >
+                      {m.label}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2.5 text-sm leading-6 text-ink-2">
+                  Plan for one of these cities. We’ll add more as Qloo’s coverage grows.
+                </p>
+              </section>
               <div className="mt-7 rounded-xl border border-line bg-panel-2/45 px-4 py-4">
                 <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-accent">
                   Prepared judge example

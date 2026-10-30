@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { RunResult } from "@/components/run-result";
 import { OperationalVerification } from "@/components/parallel-result";
-import { parallelView, toParallelMarkdown } from "@/lib/crashtest/parallel-view";
+import { parallelView, preferenceAccount, toParallelMarkdown, vetoAccount } from "@/lib/crashtest/parallel-view";
 import { buildParallelJudgeGraph } from "@/lib/crashtest/parallel-judge-graph";
 import { visibleGraph } from "@/lib/crashtest/judge-graph";
 import { layoutGraph } from "@/lib/crashtest/judge-layout";
@@ -35,7 +35,10 @@ describe("parallel results", () => {
             fromVenue: "For Your Eyes Only",
             toCandidateId: "user",
             toVenue: "Barbican Conservatory",
-            reason: "For Your Eyes Only is a strip club, not the required launch setting.",
+            reason: "For Your Eyes Only failed the operational check: its official site says it is a strip club.",
+            fromSource: "agent",
+            fromQlooCategory: "cocktail bar",
+            kind: "wrong_establishment",
           },
           checks: [
             {
@@ -59,8 +62,10 @@ describe("parallel results", () => {
         }}
       />,
     );
-    expect(html).toContain("The cultural comparison recommended For Your Eyes Only");
-    expect(html).toContain("We therefore moved to");
+    expect(html).toContain("The evidence agent picked For Your Eyes Only, which Qloo lists as a cocktail bar.");
+    expect(html).toContain("its official site says it is a strip club.");
+    expect(html).toContain("Qloo&#x27;s record of For Your Eyes Only is inaccurate: the error is in Qloo&#x27;s data, not in how the plan was chosen.");
+    expect(html).toContain("The plan now uses Barbican Conservatory.");
     expect(html).toContain("Barbican Conservatory");
     expect(html).toContain("Official venue hire page");
     expect(html).toContain('href="https://example.com/venue"');
@@ -95,10 +100,12 @@ describe("parallel results", () => {
     };
     state.parallel!.verdict = { ...state.parallel!.verdict, candidateId: to.candidateId };
     const html = renderToStaticMarkup(<RunResult state={state} />);
-    expect(html).toContain(`Qloo&#x27;s cultural comparison initially preferred ${fromVenue}`);
+    // A recording from before the conflict kind was kept: the account stays factual, with no blame assigned.
+    expect(html).toContain(`The cultural comparison picked ${fromVenue}.`);
     expect(html).toContain("official site identifies it as the wrong venue type");
-    expect(html).toContain("did not create a new recommendation");
-    expect(html).toContain(`highest-ranked remaining option, ${toVenue}`);
+    expect(html).not.toContain("error is in Qloo");
+    expect(html).toContain(`The plan now uses ${toVenue}.`);
+    expect(html).toContain("Changed by the web check");
   });
 
   it("shows You, LLM, Evidence-first agent and Final verdict for every choice, with Not specified for open user slots", async () => {
@@ -123,8 +130,10 @@ describe("parallel results", () => {
   });
 
   it("shows both choices when the selected and agent options are equally plausible but thin", async () => {
+    // Only considered, so the agent may test its own artist against it.
     const state = await parallel({
       ...LONDON_BRIEF,
+      sourceText: "We're considering Big Tex for the music.",
       existingChoices: [{ slot: "artist_music", name: "Big Tex" }],
     });
     const p = state.parallel!;
@@ -152,6 +161,20 @@ describe("parallel results", () => {
     expect(html).toContain("Both workable — choose by logistics");
     expect(html).toContain("Options");
     expect(html).toContain("availability, budget, logistics and direct brand fit");
+  });
+
+  it("credits the evidence agent when it independently reached the recommended plan", async () => {
+    const state = await parallel();
+    const p = state.parallel!;
+    const user = p.candidates.find((candidate) => candidate.candidateId === "user")!;
+    const agent = p.candidates.find((candidate) => candidate.candidateId === "agent")!;
+    const own = agent.plan;
+    expect(own.components.map((c) => c.label)).not.toEqual(user.plan.components.map((c) => c.label));
+    p.verdict = { ...p.verdict, candidateId: "user", track: "user", plan: user.plan };
+    agent.plan = user.plan;
+    expect(parallelView(state)!.summary.winner).toBe("Your plan, matched by the evidence-first agent");
+    agent.plan = own;
+    expect(parallelView(state)!.summary.winner).toBe("Your plan");
   });
 
   it("keeps the marketer view focused and places judge diagnostics behind one details control", async () => {
@@ -409,5 +432,56 @@ describe("parallel results", () => {
     );
     const html = renderToStaticMarkup(<RunResult state={state} />);
     expect(html).toContain("The run stopped before the plans could be compared");
+  });
+});
+
+describe("vetoAccount", () => {
+  const base = { fromCandidateId: "llm", fromVenue: "Old Hall", toCandidateId: "user", toVenue: "New Hall", fromSource: "llm" as const };
+  it("calls a closed venue out-of-date Qloo data", () => {
+    expect(vetoAccount({ ...base, reason: "Old Hall failed the operational check: it closed in 2025.", kind: "closed" })).toBe(
+      "The LLM picked Old Hall. The web check of its official source found: it closed in 2025. So Qloo's record of Old Hall is out of date: the error is in Qloo's data, not in how the plan was chosen. The plan now uses New Hall.",
+    );
+  });
+  it("calls a capacity limit a practical fact, not a data error", () => {
+    const text = vetoAccount({ ...base, reason: "Old Hall failed the operational check: it holds 80.", kind: "capacity", toVenue: null });
+    expect(text).toContain("a practical limit that Qloo's taste data doesn't cover");
+    expect(text).not.toContain("error is in Qloo");
+    expect(text).toContain("No other venue passed the check, so the venue is left open.");
+  });
+});
+
+describe("preferenceAccount", () => {
+  it("says who picked each venue, what the cited facts showed and why the plan moved", () => {
+    expect(
+      preferenceAccount({
+        fromCandidateId: "agent",
+        fromVenue: "Studio 73",
+        fromSource: "agent",
+        toCandidateId: "llm",
+        toVenue: "Foro Indie Rocks!",
+        toSource: "llm",
+        concerns: ["outside the area the brief names"],
+        note: "It is in Condesa, not Roma Norte.",
+      }),
+    ).toBe(
+      "Studio 73 (picked by the evidence agent) led the Qloo comparison, but cited web sources show it is outside the area the brief names. It is in Condesa, not Roma Norte. Foro Indie Rocks! (picked by the LLM) keeps the same named choices without that problem, so the plan uses Foro Indie Rocks!.",
+    );
+  });
+
+  it("shows the switch under What changed because of Qloo", async () => {
+    const state = await parallel();
+    const p = state.parallel!;
+    const llm = p.candidates.find((c) => c.candidateId === "llm")!;
+    const toVenue = llm.plan.components.find((c) => c.slot === "event_place")!.label;
+    p.verdict = { ...p.verdict, candidateId: "llm", track: "llm", plan: llm.plan };
+    p.operational = {
+      version: "operational:v2",
+      checkedAt: "2026-10-30T00:00:00.000Z",
+      checks: [],
+      preference: { fromCandidateId: "agent", fromVenue: "Members Club", fromSource: "agent", toCandidateId: "llm", toVenue, toSource: "llm", concerns: ["not open to the launch's guests"], note: "It is a private members' club." },
+    };
+    const html = renderToStaticMarkup(<RunResult state={state} />);
+    expect(html).toContain("Changed by the web check");
+    expect(html).toContain("Members Club (picked by the evidence agent) led the Qloo comparison");
   });
 });

@@ -93,9 +93,12 @@ export async function measurementAnchors(input: {
   brief: LaunchBrief;
 }): Promise<{ anchors: EntityRef[]; source: "user" | "model_hypothesis"; notes: string[] }> {
   const { llm, ctx, brief } = input;
+  let unresolved: string[] = [];
   if (brief.audienceAnchors.length) {
     const r = await resolveAnchors({ llm, ctx, brief, names: brief.audienceAnchors });
-    return { anchors: r.anchors, source: "user", notes: r.notes };
+    if (r.anchors.length) return { anchors: r.anchors, source: "user", notes: r.notes };
+    // Genre words ("MPB") aren't Qloo entities; suggest measurable anchors rather than stop the run.
+    unresolved = [`None of the brief's audience references (${brief.audienceAnchors.join(", ")}) is a Qloo entity, so model-suggested anchors are used instead.`, ...r.notes];
   }
   const { data } = await generateStructured(llm, {
     schema: hypothesisSchema,
@@ -110,6 +113,7 @@ export async function measurementAnchors(input: {
     source: "model_hypothesis",
     notes: [
       `No audience anchors were given, so model-suggested anchors (${r.anchors.map((a) => a.name).join(", ") || "none found"}) stand for the audience in every track's tests. Please confirm they fit.`,
+      ...unresolved,
       ...r.notes,
     ],
   };
@@ -173,7 +177,7 @@ export async function buildUserTrack(input: {
       let direction: Component = { slot: choice.slot, label: choice.name, ...meta, resolution: "not_found", entity: null, tags: [], placeCategory: null };
       if (anchors.length) {
         const vocab = await directionVocabulary(ctx, anchors.map((a) => a.id));
-        const mapped = await mapDirection(llm, choice.name, vocab);
+        const mapped = await mapDirection(llm, choice.name, vocab, ctx.directions);
         direction = { ...direction, tags: mapped.tags, resolution: mapped.tags.length ? "resolved" : "not_found" };
         if (mapped.note) assumptions.push(`Your creative direction: ${mapped.note}`);
       }

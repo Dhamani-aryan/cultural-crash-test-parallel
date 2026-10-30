@@ -5,13 +5,15 @@ import { generateStructured } from "@/lib/llm/structured";
 import type { LlmClient } from "@/lib/llm/types";
 import type { Market } from "@/lib/markets";
 import type { InsightsInput, QlooEntity } from "@/lib/qloo";
+import { fitConcerns } from "@/lib/operational/gate";
+import type { OperationalResearchClient } from "@/lib/operational/types";
 import { BudgetExceeded } from "./ledger";
 import type { GatherContext } from "./gather";
 import { judgeHybrid } from "./hybrid";
 import type { IntentContract } from "./intent";
 import { itemsFrom, sanitizeInsights } from "./ledger";
 import { compareVectors, evidenceVector, roleKey } from "./matrix";
-import { briefText, categoryOf, directionVocabulary, mapDirection, resolveEntityComponent, toRef } from "./plan";
+import { briefText, categoryOf, directionVocabulary, findInMarket, findPlace, mapDirection, resolveEntityComponent, toRef } from "./plan";
 import { briefTerms, categoryOfVenue, fitsBrief, isFoodAndDrink, repairDirection, screen, type DraftTrial } from "./repair";
 import { PRESTIGE, avoidedMatch, brandRole, centralityFlag, distanceKm, mainstreamFlag, neighborhoodFit, preferredCategories, selectionHostTier, type Centroid, type RoleCheck } from "./screens";
 import {
@@ -53,7 +55,11 @@ export const RESERVE_SIZE = 12;
 export const BEAM_WIDTH = 6;
 /** Candidates per slot the structured role check reads. */
 export const ROLE_CHECK_SIZE = 10;
+/** How far around a confirmed neighbourhood's point its venues are pooled. */
+export const NEIGHBORHOOD_RADIUS_M = 2000;
 export const CHALLENGE_ROUNDS = { quick: 2, thorough: 3 } as const;
+/** How many of its top venues the agent checks on the web before choosing (one search each). */
+export const WEB_CHECK_VENUES = 3;
 
 type EntitySlot = Exclude<Slot, "creative_direction">;
 type Lane = PoolRecord["lanes"][number];
@@ -62,6 +68,8 @@ type Lane = PoolRecord["lanes"][number];
 export interface Proxy {
   hard: number;
   lock: number;
+  /** A choice the brief names plainly (not fixed, not only considered): kept unless it concretely can't do the job (parallel:v9). */
+  named: number;
   roleBad: number;
   briefBad: number;
   /** In (+1), outside (-0.5) or far from (-1) a neighbourhood the brief names: brief fit, ranked above affinity. */
@@ -86,13 +94,13 @@ export interface PoolCandidate {
   proxy: Proxy;
 }
 
-const ZERO: Proxy = { hard: 0, lock: 0, roleBad: 0, briefBad: 0, hood: 0, doubt: 0, weakAudience: 0, audience: 0, local: 0, distinct: 0 };
+const ZERO: Proxy = { hard: 0, lock: 0, named: 0, roleBad: 0, briefBad: 0, hood: 0, doubt: 0, weakAudience: 0, audience: 0, local: 0, distinct: 0 };
 
 /** A partial or complete bundle's search order: the v3 plan-comparison order, on pre-test facts only. */
 export function bundleVector(parts: Proxy[]): number[] {
   const s = parts.reduce((a, p) => Object.fromEntries(Object.keys(a).map((k) => [k, a[k as keyof Proxy] + p[k as keyof Proxy]])) as unknown as Proxy, { ...ZERO });
   // Requested distinctiveness ranks with brief fit, above affinity (screens:v4).
-  return [-s.hard, s.lock, -s.roleBad, -s.briefBad, s.hood, -s.distinct, -s.doubt, -s.weakAudience, s.audience, s.local];
+  return [-s.hard, s.lock, s.named, -s.roleBad, -s.briefBad, s.hood, -s.distinct, -s.doubt, -s.weakAudience, s.audience, s.local];
 }
 
 const sameEntity = (a: Component, b: Component) => (a.entity && b.entity ? a.entity.id === b.entity.id : nameKey(a.label) === nameKey(b.label));
@@ -141,7 +149,7 @@ const roleSchema = z.object({
 });
 
 export const ROLE_SYSTEM =
-  "You screen candidates for one job in a product launch plan. For each candidate, say whether it can credibly do that job for this brief (fits, doubtful or wrong), and whether it keeps the product central. Use only the brief and the facts given for each candidate. Never claim availability, size, prices, attendance or sales. One short reason each.";
+  "You screen candidates for one job in a product launch plan. For each candidate, say whether it can credibly do that job for this brief (fits, doubtful or wrong), and whether it keeps the product central. \"wrong\" is only for a concrete reason it cannot do this kind of job: it is not that kind of entity (not a performer, not a brand, not a place that hosts events), it is the launching brand itself, it breaks a rule the brief states, or the facts given show it is the wrong kind of establishment for the event. Taste, audience fit, fame and how well it matches the brand's style are measured elsewhere: at most \"doubtful\", never \"wrong\". A choice the brief itself names is the marketer's own and is \"wrong\" only for one of those concrete reasons. Use only the brief and the facts given for each candidate. Never claim availability, size, prices, attendance or sales. One short reason each.";
 
 const JOB: Record<EntitySlot, string> = {
   artist_music: "the music act for the launch event",
@@ -208,6 +216,63 @@ export async function checkRoles(
   return out;
 }
 
+// ---------- the agent's own proposals ----------
+
+/** Names the agent proposes for an open slot; each must still resolve in Qloo and pass every screen. */
+export const PROPOSAL_SIZE = 5;
+
+const proposalSchema = z.object({
+  names: z.array(z.string()).max(PROPOSAL_SIZE).describe("real, currently operating names, most suitable first"),
+});
+
+export const PROPOSAL_SYSTEM =
+  "You suggest candidates for one job in a product launch plan in one city. Name real, specific, currently operating candidates that a strong local strategist would shortlist for this brief: the right kind of place or act for the stated event, in the area the brief names when it names one, and suited to the audience. Names only, most suitable first. They will be checked against Qloo and screened; do not invent names.";
+
+/**
+ * For a slot the brief leaves open, one bounded model call proposes up to PROPOSAL_SIZE names
+ * (parallel:v9). Each is resolved in Qloo in this city; unresolved names are dropped, and the rest
+ * enter the pool as one more view, screened exactly like Qloo's own candidates. The agent never
+ * sees the LLM track's plan.
+ */
+async function proposeForSlot(input: AgentInput, slot: EntitySlot): Promise<QlooEntity[]> {
+  const { ctx, brief, contract } = input;
+  const { data } = await generateStructured(input.llm, {
+    schema: proposalSchema,
+    system: PROPOSAL_SYSTEM,
+    prompt: [
+      briefText(brief, ctx.market),
+      contract.neighborhoods.length ? `Area named in the brief: ${contract.neighborhoods.map((n) => n.value).join(", ")}` : "",
+      contract.formats.length ? `Event: ${contract.formats.map((f) => f.phrase).join(", ")}` : "",
+      contract.negative.length ? `The brief avoids: ${contract.negative.map((n) => n.phrase).join("; ")}` : "",
+      `Job: ${JOB[slot]} in ${ctx.market.label}.`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    label: `propose:${slot}`,
+  });
+  const names = [...new Set(data.names.map((n) => n.trim()).filter(Boolean))].slice(0, PROPOSAL_SIZE);
+  const found = await mapLimit(names, 3, async (name) => {
+    try {
+      return slot === "event_place" ? await findPlace(ctx.client, name, ctx.market) : await findInMarket(ctx.client, name, [slot === "artist_music" ? "artist" : "brand"], ctx.market);
+    } catch (err) {
+      if (err instanceof BudgetExceeded) throw err;
+      return null;
+    }
+  });
+  const entities = found.filter((e): e is QlooEntity => !!e);
+  ctx.ledger.add({
+    purpose: `The agent's own ${SLOT_LABEL[slot].toLowerCase()} proposals for the open slot, resolved in Qloo`,
+    queryKind: "search",
+    sanitizedRequest: { slot, proposed: names },
+    qlooEntityIds: entities.map((e) => e.id),
+    results: names.map((n, i) => ({ id: found[i]?.id ?? n, name: `${n}: ${found[i] ? `found as ${found[i]!.displayName}` : "not found in Qloo"}` })),
+    resultCount: entities.length,
+    coverageStatus: entities.length ? "usable" : "empty",
+    warnings: [],
+  });
+  return entities;
+}
+
 // ---------- pooling ----------
 
 export interface AgentInput {
@@ -229,9 +294,15 @@ export interface AgentInput {
   briefFingerprint: string;
   rounds: number;
   beamWidth?: number;
+  /** Optional cited web fit check for the agent's own top venues (parallel:v11). */
+  operational?: OperationalResearchClient;
+  signal?: AbortSignal;
 }
 
 const DOMAIN: Record<EntitySlot, "artist" | "brand" | "place"> = { artist_music: "artist", brand_collaboration: "brand", event_place: "place" };
+
+/** A named choice the screens show concretely can't do its job: a hard failure, or the role check's "wrong". */
+const cantDoJob = (s: PoolRecord["screens"]) => s.role === "fail" || s.notes.includes("role check: wrong");
 
 function proxyOf(c: Omit<PoolCandidate, "proxy">, strength: "locked" | "preferred" | "considered" | undefined): Proxy {
   const s = c.screens;
@@ -239,6 +310,7 @@ function proxyOf(c: Omit<PoolCandidate, "proxy">, strength: "locked" | "preferre
   return {
     hard: s.role === "fail" && s.notes.some((n) => n.startsWith("hard:")) ? 1 : 0,
     lock: strength === "locked" ? 1 : 0,
+    named: c.source === "user" && strength === "preferred" && !cantDoJob(s) ? 1 : 0,
     roleBad: s.role === "fail" ? 1 : 0,
     briefBad: s.brief === "fail" ? 1 : s.brief === "flag" ? 0.5 : 0,
     hood: s.hood === "near" ? 1 : s.hood === "outside" ? -0.5 : s.hood === "far" ? -1 : 0,
@@ -353,8 +425,27 @@ async function entityPool(input: AgentInput, slot: EntitySlot, fixed: Component[
   const others = fixed.flatMap((f) => (f.entity ? [f.entity.id] : []));
   const asks: Promise<void>[] = [ask("audience", `Pool ${what} candidates for this audience in ${ctx.market.label}`, base)];
   if (others.length) asks.push(ask("combined", `Pool ${what} candidates for this audience with the plan's fixed choices`, { ...base, signalEntities: [...base.signalEntities!, ...others] }));
-  if (place && contract.neighborhoods[0])
-    asks.push(ask("neighborhood", `Pool venues in ${contract.neighborhoods[0].value}, which the brief names`, { ...base, filterLocationQuery: `${contract.neighborhoods[0].value}, ${ctx.market.qlooLocation}` }));
+  // Venues in the named neighbourhood: around its confirmed point when known (a text query like
+  // "Bushwick, New York City" returns the city's landmarks), else by name.
+  if (place && contract.neighborhoods[0]) {
+    const hood = input.neighborhood;
+    asks.push(
+      ask(
+        "neighborhood",
+        `Pool venues in ${contract.neighborhoods[0].value}, which the brief names`,
+        hood
+          ? { ...base, filterLocationQuery: undefined, extraParams: { "filter.location": `POINT(${hood.lon} ${hood.lat})`, "filter.location.radius": NEIGHBORHOOD_RADIUS_M } }
+          : { ...base, filterLocationQuery: `${contract.neighborhoods[0].value}, ${ctx.market.qlooLocation}` },
+      ),
+    );
+  }
+  // An open slot also gets the agent's own proposals, verified in Qloo like every other view.
+  if (!user)
+    asks.push(
+      proposeForSlot(input, slot).then((entities) => {
+        views.push({ view: "proposals", entities, evidenceId: ctx.ledger.records.at(-1)!.evidenceId });
+      }),
+    );
   await Promise.all(asks);
   const top = (await cityList(ctx.client, DOMAIN[slot], ctx.market.qlooLocation, categories)).slice(0, VIEW_SIZE);
   const localRec = ctx.ledger.add({
@@ -457,6 +548,8 @@ async function entityPool(input: AgentInput, slot: EntitySlot, fixed: Component[
   const viable = scored.filter((c) => c.screens.role !== "fail" && c.screens.brief !== "fail").sort((a, b) => compareVectors(bundleVector([b.proxy]), bundleVector([a.proxy])));
   // Diversify: the best two of each lane first, then the strongest remaining; the user's candidate always.
   const pool: PoolCandidate[] = viable.filter((c) => c.source === "user");
+  // The two strongest of the agent's own proposals that passed every screen, then the lanes.
+  for (const c of viable.filter((x) => x.views.proposals !== undefined).slice(0, 2)) if (!pool.includes(c) && pool.length < POOL_SIZE) pool.push(c);
   for (const lane of ["affinity", "locality", "brief_fit"] as Lane[])
     for (const c of viable.filter((x) => x.lanes.includes(lane)).slice(0, 2)) if (!pool.includes(c) && pool.length < POOL_SIZE) pool.push(c);
   for (const c of viable) if (!pool.includes(c) && pool.length < POOL_SIZE) pool.push(c);
@@ -595,12 +688,29 @@ export interface SelectionFlags {
 }
 
 /**
- * The agent's selection order: the evidence vector's hard rules, locks and completeness first, then
- * its own role screen, the whole-plan guard and the brief's distinctiveness and neighbourhood
- * intent, then the rest of the evidence vector (brief fit, audience, locality, …, coverage last).
+ * The agent's selection order, aligned with the final judge's first priority (parallel:v9): the
+ * evidence vector's hard rules and locks, then keeping the choices the brief names (`named`, see
+ * namedScore), then completeness, its own role screen, the whole-plan guard and the brief's
+ * distinctiveness and neighbourhood intent, then the rest of the evidence vector (coverage last).
  */
-export function agentKey(ev: number[], f: SelectionFlags): number[] {
-  return [...ev.slice(0, 3), -f.role, f.guard ? -1 : 0, -f.intent, ...ev.slice(3)];
+export function agentKey(ev: number[], f: SelectionFlags, named = 0): number[] {
+  return [...ev.slice(0, 2), named, ev[2], -f.role, f.guard ? -1 : 0, -f.intent, ...ev.slice(3)];
+}
+
+/**
+ * How well a plan keeps the choices the brief names plainly: +1 for each one kept, -1 for each one
+ * replaced, and nothing either way for one that concretely can't do its job. The judge ranks keeping
+ * named choices first, so the agent does too. Locked choices are the lock rule's; choices the brief
+ * was only considering stay a weighted preference inside the evidence vector, below brief fit.
+ */
+export function namedScore(plan: CulturalPlan, named: { component: Component; strength: "locked" | "preferred" | "considered"; cantDoJob: boolean }[]): number {
+  let score = 0;
+  for (const n of named) {
+    if (n.strength !== "preferred" || n.cantDoJob) continue;
+    const kept = plan.components.some((c) => c.slot === n.component.slot && sameEntity(c, n.component) && c.origin === "user_provided");
+    score += kept ? 1 : -1;
+  }
+  return score;
 }
 
 export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> {
@@ -619,7 +729,7 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     if (choice.slot === "creative_direction") {
       component = { slot: choice.slot, label: choice.name, ...meta, resolution: "not_found", entity: null, tags: [], placeCategory: null };
       if (input.anchors.length) {
-        const mapped = await mapDirection(input.llm, choice.name, await directionVocabulary(ctx, input.anchors.map((a) => a.id)));
+        const mapped = await mapDirection(input.llm, choice.name, await directionVocabulary(ctx, input.anchors.map((a) => a.id)), ctx.directions);
         component = { ...component, tags: mapped.tags, resolution: mapped.tags.length ? "resolved" : "not_found" };
       }
     } else {
@@ -682,7 +792,15 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
   const screenBy = new Map<string, PoolRecord["screens"]>();
   for (const list of [...pools.values(), ...reserves.values()]) for (const c of list) screenBy.set(roleKey(c.component), c.screens);
   const flagsOf = (plan: CulturalPlan) => selectionFlags(plan, (c) => screenBy.get(roleKey(c)), contract);
-  const keyOf = (m: EvidenceMatrix, c: CandidatePlan) => agentKey(evidenceVector(m, c.candidateId), flagsOf(c.plan));
+  const named = [...userCands.values()].map((u) => {
+    const sc = screenBy.get(roleKey(u.component));
+    return { ...u, cantDoJob: !!sc && cantDoJob(sc) };
+  });
+  const keyOf = (m: EvidenceMatrix, c: CandidatePlan) => agentKey(evidenceVector(m, c.candidateId), flagsOf(c.plan), namedScore(c.plan, named));
+  // A named choice the plan keeps isn't challenged unless it concretely can't do its job: the
+  // judge would count replacing it against the plan, so the rounds go to the slots the agent filled.
+  const protectedSlots = (plan: CulturalPlan) =>
+    new Set([...lockedSlots, ...named.filter((n) => n.strength === "preferred" && !n.cantDoJob && plan.components.some((c) => c.slot === n.component.slot && c.origin === "user_provided")).map((n) => n.component.slot)]);
   const m0 = input.matrix(tested);
   let incumbent = [...tested].sort((a, b) => compareVectors(keyOf(m0, b), keyOf(m0, a)))[0];
 
@@ -693,8 +811,9 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     const m = input.matrix([incumbent]);
     // A choice the agent's own screens flag (wrong role, a generic default the brief asks to avoid,
     // outside the named neighbourhood) is challenged first; otherwise the weakest recorded claims.
-    const flag = flagsOf(incumbent.plan).notes.find((n) => !lockedSlots.has(n.slot));
-    const weak = flag ? { slot: flag.slot, claimIds: [], statement: `${SLOT_LABEL[flag.slot]} "${flag.label}": ${flag.why}.` } : weakestSlot(incumbent, m, lockedSlots);
+    const guarded = protectedSlots(incumbent.plan);
+    const flag = flagsOf(incumbent.plan).notes.find((n) => !guarded.has(n.slot));
+    const weak = flag ? { slot: flag.slot, claimIds: [], statement: `${SLOT_LABEL[flag.slot]} "${flag.label}": ${flag.why}.` } : weakestSlot(incumbent, m, guarded);
     if (!weak) {
       stop = "no_weakness";
       break;
@@ -752,6 +871,62 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     incumbent = cand;
   }
 
+  // Before committing, the agent checks its own top venues against cited web facts. It may move
+  // only to another tested plan that is just as good on hard rules, locks, the user's named choices
+  // and completeness, whose venue has fewer cited concerns.
+  let webCheck: AgentRecord["webCheck"];
+  if (input.operational && stop !== "budget") {
+    const mAll = input.matrix(tested);
+    const ranked = [...tested].sort((a, b) => compareVectors(keyOf(mAll, b), keyOf(mAll, a)));
+    const top = keyOf(mAll, ranked[0]).slice(0, 4).join(",");
+    const venueOf = (c: CandidatePlan) => c.plan.components.find((x) => x.slot === "event_place");
+    const peers = ranked.filter((c) => keyOf(mAll, c).slice(0, 4).join(",") === top && venueOf(c));
+    const first = venueOf(incumbent);
+    const venues = [...new Set([first?.label, ...peers.map((c) => venueOf(c)!.label)].filter((v): v is string => !!v))].slice(0, WEB_CHECK_VENUES);
+    if (first && first.origin !== "user_provided" && venues.length > 1) {
+      try {
+        const { checks } = await input.operational.verifyVenues({
+          venues,
+          city: ctx.market.label,
+          area: contract.neighborhoods[0]?.value,
+          brief: { productCategory: input.brief.productCategory, launchGoal: input.brief.launchGoal, audienceDescription: input.brief.audienceDescription, sourceText: input.brief.sourceText },
+          signal: input.signal,
+        });
+        const checkOf = (label: string) => checks.find((c) => c.venue.trim().toLowerCase() === label.trim().toLowerCase());
+        const cost = (c: CandidatePlan) => {
+          const check = checkOf(venueOf(c)!.label);
+          return check?.status === "verified_conflict" ? 99 : fitConcerns(check).length;
+        };
+        webCheck = { checks };
+        ctx.ledger.add({
+          purpose: "The agent's web check of its own top venues, before choosing",
+          queryKind: "review",
+          sanitizedRequest: { venues, area: contract.neighborhoods[0]?.value ?? null },
+          qlooEntityIds: [],
+          results: checks.map((c) => ({ id: c.venue, name: `${c.venue}: ${c.status === "verified_conflict" ? "conflict" : fitConcerns(c).join(", ") || "no cited concern"}` })),
+          resultCount: checks.length,
+          coverageStatus: checks.some((c) => c.sources.length) ? "usable" : "empty",
+          warnings: [],
+        });
+        const mine = cost(incumbent);
+        const better = peers.filter((c) => checkOf(venueOf(c)!.label)).find((c) => cost(c) < mine);
+        if (mine > 0 && better) {
+          const was = checkOf(first.label);
+          webCheck.moved = {
+            fromVenue: first.label,
+            toVenue: venueOf(better)!.label,
+            concerns: was?.status === "verified_conflict" ? [was.finding] : fitConcerns(was),
+            note: was?.fit?.note ?? was?.finding ?? "",
+          };
+          incumbent = better;
+        }
+      } catch (err) {
+        if (err instanceof BudgetExceeded) throw err;
+        // The web check is optional: without it the agent keeps its own choice.
+      }
+    }
+  }
+
   return {
     plan: incumbent.plan,
     evaluation: incumbent.evaluation!,
@@ -760,7 +935,7 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     assumptions: incumbent.open.map((o) => `${SLOT_LABEL[o.slot]} left open: ${o.reason}`),
     tested,
     trials,
-    record: { contract, beamWidth: width, pools: records, bundlesTested: tested.length, rounds, stop, selection: flagsOf(incumbent.plan) },
+    record: { contract, beamWidth: width, pools: records, bundlesTested: tested.length, rounds, stop, selection: flagsOf(incumbent.plan), webCheck },
   };
 }
 
@@ -807,6 +982,46 @@ export async function neighborhoodCentroid(ctx: GatherContext, contract: IntentC
   });
   if (!at) return null;
   return { name: hood.value, lat: at.lat, lon: at.lon, count: pts.length, evidenceId: rec.evidenceId };
+}
+
+/**
+ * Places the brief only puts something "in" ("a café in Hackney", "in Bushwick, Brooklyn") become
+ * neighbourhoods when Qloo has a locality of exactly that name in this city. A confirmed locality
+ * that Qloo files under one of the brief's broader areas (Bushwick under Brooklyn) is the more
+ * specific one and comes first. Anything Qloo doesn't confirm ("weavers in Bengal") is ignored.
+ */
+export async function confirmNeighborhoods(ctx: GatherContext, contract: IntentContract): Promise<IntentContract> {
+  const mentions = contract.placeMentions ?? [];
+  if (!mentions.length) return contract;
+  const city = [ctx.market.label, ctx.market.qlooLocation].map((x) => x.toLowerCase());
+  const found = await Promise.all(
+    mentions.map(async (m) => {
+      const places = await ctx.client.searchEntities({ query: m.value, types: ["urn:entity:locality"], take: 5 }).catch((err) => {
+        if (err instanceof BudgetExceeded) throw err;
+        return [];
+      });
+      const hit = places.find((e) => nameKey(e.name) === nameKey(m.value) && e.akas.some((a) => city.some((c) => a.toLowerCase().includes(c))));
+      return { m, hit };
+    }),
+  );
+  ctx.ledger.add({
+    purpose: `Confirm the places the brief puts the launch in as ${ctx.market.label} localities`,
+    queryKind: "search",
+    sanitizedRequest: { query: mentions.map((m) => m.value), types: ["urn:entity:locality"] },
+    qlooEntityIds: found.flatMap((f) => (f.hit ? [f.hit.id] : [])),
+    results: found.map((f) => ({ id: f.hit?.id ?? f.m.value, name: `${f.m.value}: ${f.hit ? "a locality here" : "not confirmed"}` })),
+    resultCount: found.filter((f) => f.hit).length,
+    coverageStatus: found.some((f) => f.hit) ? "usable" : "empty",
+    warnings: [],
+  });
+  const neighborhoods = [...contract.neighborhoods];
+  for (const { m, hit } of found) {
+    if (!hit) continue;
+    const broader = neighborhoods.findIndex((n) => hit.akas.some((a) => a.toLowerCase().includes(n.value.toLowerCase())));
+    if (broader >= 0) neighborhoods.splice(broader, 0, m);
+    else neighborhoods.push(m);
+  }
+  return { ...contract, neighborhoods };
 }
 
 /** Role readings for components the agent didn't pool (the user's and the LLM's), so every plan is screened alike. */

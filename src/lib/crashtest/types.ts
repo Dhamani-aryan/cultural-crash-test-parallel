@@ -696,6 +696,12 @@ export interface AgentRecord {
     | "budget";
   /** What the agent's own versioned screens say against the plan it kept. */
   selection?: import("./agent").SelectionFlags;
+  /** parallel:v11: the cited web fit check the agent ran on its top venues before choosing. */
+  webCheck?: {
+    checks: import("@/lib/operational/types").VenueOperationalCheck[];
+    /** Set when the check moved the agent from its first venue to another of its tested plans. */
+    moved?: { fromVenue: string; toVenue: string; concerns: string[]; note: string };
+  };
 }
 
 export interface FinalVerdict {

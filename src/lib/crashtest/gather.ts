@@ -77,6 +77,8 @@ export interface GatherContext {
   market: Market;
   /** How repair candidates are retrieved and ranked (v1 when absent). */
   ranking?: Ranking;
+  /** One run's creative-direction readings, shared so the same words map to the same Qloo tags in every track. */
+  directions?: Map<string, Promise<{ tags: import("./types").TagRef[]; note: string }>>;
 }
 
 async function insights(

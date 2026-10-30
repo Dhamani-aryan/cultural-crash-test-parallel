@@ -11,6 +11,7 @@ import {
   BEAM_WIDTH,
   ROLE_SYSTEM,
   checkRemainingRoles,
+  confirmNeighborhoods,
   neighborhoodCentroid,
   planFingerprint,
   runEvidenceAgent,
@@ -27,6 +28,7 @@ import { auditRecommendationStability } from "./stability";
 import {
   addOperationalClaims,
   applyOperationalGate,
+  applyVenueFitPreference,
   operationalSalvageSource,
   operationalVenues,
 } from "@/lib/operational/gate";
@@ -205,11 +207,13 @@ export async function runParallelCrashTest(
   );
   state.evidenceLedger = ledger.records;
   const ranking = rankingFrom(opts.ranking);
+  const directions: GatherContext["directions"] = new Map();
   const ctxFor = (scope: UsageScope): GatherContext => ({
     client: clientFor(scope),
     ledger: scopedLedger(ledger, scope),
     market,
     ranking,
+    directions,
   });
   const evaluateIn =
     (scope: UsageScope) =>
@@ -360,6 +364,7 @@ export async function runParallelCrashTest(
       names: anchors.map((a) => a.name),
       source: anchored.source,
     });
+    contract = await timed("shared", () => confirmNeighborhoods(ctxFor("shared"), contract!));
     // These shared preparations are independent: one reads Qloo locality data while the other
     // resolves namesakes with the model. Starting them together removes a serial round trip.
     const [resolvedNeighborhood, countries] = await Promise.all([
@@ -418,6 +423,8 @@ export async function runParallelCrashTest(
         briefFingerprint: frozen.fingerprint,
         rounds: maxRounds,
         beamWidth,
+        operational: deps.operational,
+        signal: opts.signal,
       }),
     );
     // Do not let one failed track return the run while the other tracks are still emitting events
@@ -561,13 +568,14 @@ export async function runParallelCrashTest(
     if (venues.length) {
       stage(
         "verify",
-        "Checking the original and leading venue against current operational sources",
+        "Checking the finalists' venues against current web sources",
       );
       const started = Date.now();
       try {
         const checked = await deps.operational.verifyVenues({
           venues,
           city: market.label,
+          area: contract?.neighborhoods[0]?.value,
           brief: {
             productCategory: brief.productCategory,
             launchGoal: brief.launchGoal,
@@ -665,12 +673,17 @@ export async function runParallelCrashTest(
           }
         }
         const gated = applyOperationalGate(candidates, fin, checked.checks);
-        fin = gated.result;
+        // With no veto, the finalists' cited fit facts may still choose between their venues.
+        const preferred = gated.override
+          ? { result: gated.result }
+          : applyVenueFitPreference(candidates, gated.result, checked.checks, matrixOf(contenders).hardFailures);
+        fin = preferred.result;
         operational = {
-          version: "operational:v1",
+          version: "operational:v2",
           checkedAt: new Date().toISOString(),
           checks: checked.checks,
           override: gated.override,
+          preference: preferred.preference,
         };
       } catch (error) {
         const finding =
@@ -687,7 +700,7 @@ export async function runParallelCrashTest(
           sources: [],
         }));
         operational = {
-          version: "operational:v1",
+          version: "operational:v2",
           checkedAt: new Date().toISOString(),
           checks,
         };

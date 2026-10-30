@@ -180,16 +180,19 @@ export async function findPlace(
   name: string,
   market: Market,
 ): Promise<QlooEntity | null> {
-  const hits = await client.searchEntities({
-    query: `${name} ${market.qlooLocation}`,
-    types: ["urn:entity:place"],
-    take: 5,
-  });
-  const inCity = hits.filter((h) => h.geocode?.countryCode?.toUpperCase() === market.country);
   const k = nameKey(name);
+  const match = (hits: QlooEntity[]) => {
+    const inCity = hits.filter((h) => h.geocode?.countryCode?.toUpperCase() === market.country);
+    return (
+      inCity.find((h) => nameKey(h.name) === k) ??
+      inCity.find((h) => nameKey(h.name).startsWith(k) || k.startsWith(nameKey(h.name)))
+    );
+  };
+  // The city in the query helps a common name, but Qloo's search can rank the city's own
+  // landmarks above the venue ("Brooklyn Steel New York City"), so the bare name is tried next.
   const hit =
-    inCity.find((h) => nameKey(h.name) === k) ??
-    inCity.find((h) => nameKey(h.name).startsWith(k) || k.startsWith(nameKey(h.name)));
+    match(await client.searchEntities({ query: `${name} ${market.qlooLocation}`, types: ["urn:entity:place"], take: 5 })) ??
+    match(await client.searchEntities({ query: name, types: ["urn:entity:place"], take: 5 }));
   if (!hit) return null;
   const [full] = await client.getEntities([hit.id]);
   return full ?? hit;
@@ -273,7 +276,18 @@ export async function mapDirection(
   llm: LlmClient,
   direction: string,
   vocab: Map<string, TagRef>,
+  shared?: Map<string, Promise<{ tags: TagRef[]; note: string }>>,
 ): Promise<{ tags: TagRef[]; note: string }> {
+  if (shared) {
+    // The same direction over the same vocabulary is read once per run, whichever track asks first.
+    const key = `${direction.trim().toLowerCase()}|${[...vocab.values()].map((t) => t.id).sort().join(",")}`;
+    const hit = shared.get(key);
+    if (hit) return hit;
+    const reading = mapDirection(llm, direction, vocab);
+    shared.set(key, reading);
+    reading.catch(() => shared.delete(key));
+    return reading;
+  }
   const names = [...new Set([...vocab.values()].map((t) => t.name))].sort();
   const { data } = await generateStructured(llm, {
     schema: tagSchema,
@@ -470,7 +484,7 @@ export async function buildPlan(input: {
       ctx,
       anchors.map((a) => a.id),
     );
-    const mapped = await mapDirection(llm, draft.direction, vocab);
+    const mapped = await mapDirection(llm, draft.direction, vocab, ctx.directions);
     direction = {
       ...direction,
       tags: mapped.tags,

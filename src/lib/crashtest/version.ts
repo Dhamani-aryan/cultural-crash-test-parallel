@@ -40,8 +40,21 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * the cultural comparison; it cannot award cultural fit or invent live availability.
  * v8: a venue veto re-tests one bounded mixed plan so unrelated agent improvements are not lost;
  * equally thin user and agent choices are presented as workable options for a logistics decision.
+ * v9: the agent starts from what the marketer plainly named: it keeps those choices unless one
+ * concretely can't do its job, ranks plans by the judge's first priority, spends its challenge
+ * rounds on the slots it fills, and proposes its own candidates for an open slot, each verified in
+ * Qloo and screened like any other. The role check calls a choice wrong only for a concrete reason,
+ * a bare "in Bushwick" counts as a neighbourhood once Qloo confirms it, and a venue's district is
+ * never an operational veto.
+ * v10: the web check reads every finalist's venue (up to four) and records cited fit facts: the
+ * right kind of place, inside the named area, open to the guests. A finalist whose venue has fewer
+ * such concerns, and keeps as many named choices, is preferred; the facts only choose among plans
+ * that passed the blind comparison and never add a venue or rewrite a cultural score.
+ * v11: before committing, the agent runs the same cited web fit check on its own top venues and may
+ * move to another of its tested plans that is equally strong on rules, locks, named choices and
+ * completeness, with fewer cited venue concerns. It never leaves a venue the user named.
  */
-export const PARALLEL_VERSION = "parallel:v8";
+export const PARALLEL_VERSION = "parallel:v11";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,

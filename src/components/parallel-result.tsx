@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   parallelView,
   toParallelMarkdown,
+  preferenceAccount,
+  vetoAccount,
   type CellView,
   type ClaimView,
   type RowView,
@@ -332,20 +334,46 @@ function EvidenceDelta({ rows, operational }: { rows: RowView[]; operational?: O
         </p>
       )}
       {operational?.override && (
-        <p className="mt-3 text-xs leading-5 text-muted">
-          The venue changed for a separate reason: an official-source operational conflict, not a
-          Qloo cultural score.
-        </p>
+        <WebCheckChange from={operational.override.fromVenue} to={operational.override.toVenue} account={vetoAccount(operational.override)} sourceUrl={operational.override.sourceUrl} />
+      )}
+      {operational?.preference && (
+        <WebCheckChange from={operational.preference.fromVenue} to={operational.preference.toVenue} account={preferenceAccount(operational.preference)} sourceUrl={operational.preference.sourceUrl} />
       )}
     </section>
   );
 }
 
-function operationalConflict(reason: string): string {
-  return reason
-    .replace(/^.*?failed the operational check:\s*/i, "")
-    .replace(/\s+No operationally viable alternative was established\.?$/i, "")
-    .trim();
+/** A venue the web check removed or replaced, shown beside what Qloo changed: who picked it, why it went. */
+function WebCheckChange({ from, to, account, sourceUrl }: { from: string; to: string | null; account: string; sourceUrl?: string }) {
+  return (
+    <article className="mt-4 rounded-lg border border-conflict/30 bg-panel px-4 py-4">
+      <p className="text-xs font-bold uppercase tracking-[0.06em] text-ink">Changed by the web check</p>
+      <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.08em] text-muted">Removed</p>
+          <p className="mt-1 text-sm font-medium text-ink-2 line-through decoration-conflict/60">{from}</p>
+        </div>
+        <span aria-hidden className="text-lg text-accent">
+          →
+        </span>
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.08em] text-muted">Recommended</p>
+          <p className="mt-1 text-sm font-semibold text-ink">{to ?? "Left open"}</p>
+        </div>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-ink-2">
+        {account}
+        {sourceUrl && (
+          <>
+            {" "}
+            <a href={sourceUrl} target="_blank" rel="noreferrer" className="underline decoration-line underline-offset-2 hover:text-accent">
+              Source
+            </a>
+          </>
+        )}
+      </p>
+    </article>
+  );
 }
 
 function rowReason(r: RowView, operational?: OperationalAudit): string {
@@ -354,6 +382,9 @@ function rowReason(r: RowView, operational?: OperationalAudit): string {
     const kept = r.you.label === override.toVenue;
     return `An official-source check ruled out ${override.fromVenue}. We ${kept ? `kept your next-ranked choice, ${override.toVenue}` : `used the next-ranked choice, ${override.toVenue}`}.`;
   }
+  const preference = r.slot === "event_place" ? operational?.preference : undefined;
+  if (preference && r.final.label === preference.toVenue)
+    return `Cited web sources show ${preference.fromVenue} is ${preference.concerns.join(" and ")}, so the plan uses ${preference.toVenue}, which keeps the same named choices.`;
   if (r.final.alternative) {
     return `${r.final.label} and ${r.final.alternative} both remain workable, but the cultural evidence is too thin to separate them confidently. Choose between them using availability, budget, logistics and direct brand fit.`;
   }
@@ -486,18 +517,8 @@ function DecisionOverview({ state, rows }: { state: RunState; rows: RowView[] })
           const reason = plainSupportReason(row);
           return reason ? <p key={row.slot}>Why: {reason}</p> : null;
         })}
-        {override && (
-          <p>
-            Qloo&apos;s cultural comparison initially preferred {override.fromVenue}. The live
-            official-source check found that {operationalConflict(override.reason)}. The web check
-            did not create a new recommendation or rewrite the cultural scores; it ruled out that
-            finalist, so the final plan{" "}
-            {override.toVenue
-              ? `uses the highest-ranked remaining option, ${override.toVenue}`
-              : "leaves the venue unresolved"}
-            .
-          </p>
-        )}
+        {override && <p>{vetoAccount(override)}</p>}
+        {p.operational?.preference && <p>{preferenceAccount(p.operational.preference)}</p>}
         {!override && venueCheck?.status === "verified_fit" && (
           <p>
             The live web check also confirmed that {venueCheck.venue} is operationally plausible for
@@ -527,6 +548,13 @@ function DecisionOverview({ state, rows }: { state: RunState; rows: RowView[] })
             was then compared with your plan and the independent LLM plan.
           </p>
         )}
+        {p.agent?.webCheck?.moved && (
+          <p>
+            Before choosing, the agent checked its top venues on the web: cited sources show{" "}
+            {p.agent.webCheck.moved.fromVenue} is {p.agent.webCheck.moved.concerns.join(" and ")}, so
+            it chose {p.agent.webCheck.moved.toVenue} instead.
+          </p>
+        )}
       </div>
     </section>
   );
@@ -547,9 +575,12 @@ export function OperationalVerification({ audit }: { audit: OperationalAudit }) 
       <p className={eyebrow}>Operational verification</p>
       {audit.override && (
         <p className="max-w-3xl text-sm font-medium leading-6 text-ink">
-          The cultural comparison recommended {audit.override.fromVenue}. The operational check
-          caught this: {audit.override.reason} We therefore moved to{" "}
-          {audit.override.toVenue ?? "no final venue"}.
+          {vetoAccount(audit.override)}
+        </p>
+      )}
+      {audit.preference && (
+        <p className="max-w-3xl text-sm font-medium leading-6 text-ink">
+          {preferenceAccount(audit.preference)}
         </p>
       )}
       <div className="grid gap-3 md:grid-cols-2">
