@@ -805,9 +805,14 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
   const screenBy = new Map<string, PoolRecord["screens"]>();
   for (const list of [...pools.values(), ...reserves.values()]) for (const c of list) screenBy.set(roleKey(c.component), c.screens);
   const flagsOf = (plan: CulturalPlan) => selectionFlags(plan, (c) => screenBy.get(roleKey(c)), contract);
+  // A named choice the evidence contradicts (no audience support, or a global default) isn't held
+  // as user intent either (parallel:v13, R-user-contradicted): the rounds may replace it.
+  const contradicted = new Set(
+    tested.flatMap((t) => (t.evaluation?.components ?? []).filter((a) => a.contradicted && a.slot !== "creative_direction" && t.plan.components.some((c) => c.slot === a.slot && c.origin === "user_provided")).map((a) => a.slot)),
+  );
   const named = [...userCands.values()].map((u) => {
     const sc = screenBy.get(roleKey(u.component));
-    return { ...u, cantDoJob: !!sc && cantDoJob(sc) };
+    return { ...u, cantDoJob: (!!sc && cantDoJob(sc)) || (u.strength !== "locked" && contradicted.has(u.component.slot)) };
   });
   const keyOf = (m: EvidenceMatrix, c: CandidatePlan) => agentKey(evidenceVector(m, c.candidateId), flagsOf(c.plan), namedScore(c.plan, named));
   // A named choice the plan keeps isn't challenged unless it concretely can't do its job: the
@@ -825,8 +830,14 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     // A choice the agent's own screens flag (wrong role, a generic default the brief asks to avoid,
     // outside the named neighbourhood) is challenged first; otherwise the weakest recorded claims.
     const guarded = protectedSlots(incumbent.plan);
+    // A named choice the evidence contradicts, still in the plan, goes first (parallel:v13).
+    const stale = incumbent.plan.components.find((c) => c.origin === "user_provided" && !guarded.has(c.slot) && contradicted.has(c.slot));
     const flag = flagsOf(incumbent.plan).notes.find((n) => !guarded.has(n.slot));
-    const weak = flag ? { slot: flag.slot, claimIds: [], statement: `${SLOT_LABEL[flag.slot]} "${flag.label}": ${flag.why}.` } : weakestSlot(incumbent, m, guarded);
+    const weak = stale
+      ? { slot: stale.slot, claimIds: [], statement: `${SLOT_LABEL[stale.slot]} "${stale.label}": the brief names it, but the evidence contradicts it.` }
+      : flag
+        ? { slot: flag.slot, claimIds: [], statement: `${SLOT_LABEL[flag.slot]} "${flag.label}": ${flag.why}.` }
+        : weakestSlot(incumbent, m, guarded);
     if (!weak) {
       stop = "no_weakness";
       break;
@@ -864,7 +875,9 @@ export async function runEvidenceAgent(input: AgentInput): Promise<AgentResult> 
     const cand: CandidatePlan = { ...asCandidate(plan, evaluation, { ...incumbent.sources, [weak.slot]: alt.source === "user" ? "user" : "agent" }, incumbent.candidateId), ...ids };
     tested.push(cand);
     const pair = input.matrix([incumbent, cand]);
-    const fit = (id: string) => pair.claims.filter((x) => x.candidateId === id && x.stance === "supports" && (x.dimension === "role_fit" || x.ruleId === "R-neighborhood" || x.claimId.endsWith("/user-intent"))).length;
+    // Replacing a named choice the evidence contradicts may give up the fit that choice itself carried;
+    // the rest of the plan must still keep its fit (parallel:v13).
+    const fit = (id: string) => pair.claims.filter((x) => x.candidateId === id && x.stance === "supports" && !(stale && x.slot === weak.slot) && (x.dimension === "role_fit" || x.ruleId === "R-neighborhood" || x.claimId.endsWith("/user-intent"))).length;
     const guard = judgeHybrid(incumbent.evaluation!, evaluation, pair.hardFailures[cand.candidateId] ?? [], { before: fit(incumbent.candidateId), after: fit(cand.candidateId) });
     // Material: better on the agent's selection order before the coverage level, not just more
     // coverage. Hard rules and lost brief fit always reject; the selection order replaces the plain

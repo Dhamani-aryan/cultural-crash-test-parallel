@@ -57,8 +57,12 @@ export const DEFAULT_ARCHITECTURE: Architecture = "sequential";
  * that is only within 2 km of its centre, and both above venues further out; that closeness counts
  * before soft host doubts when it picks among its plans, so a better-typed venue across town no
  * longer beats one in the named area.
+ * v13: a choice the brief names stays unless the evidence contradicts it, and now the "unless"
+ * applies: a named act, brand or venue with no audience support here and a global default rather
+ * than a local fit is no longer protected, so the agent's rounds can replace it with a supported
+ * one; plans rank by fewer contradicted choices before positive fit. A named look stays protected.
  */
-export const PARALLEL_VERSION = "parallel:v12";
+export const PARALLEL_VERSION = "parallel:v13";
 /**
  * The structured evidence-claim rules (evidence matrix). v2: the brief-intent contract's screens
  * (host fit, neighbourhood, requested distinctiveness, product centrality, avoided qualities,
@@ -72,10 +76,12 @@ export const PARALLEL_VERSION = "parallel:v12";
  * such as "don't mix unrelated fashion and music" are not reduced to "avoid fashion".
  * v7: official operational evidence replaces the venue-feasibility unknown when available and a
  * verified conflict becomes a deterministic hard gate.
+ * v8: keeping or replacing a named choice the evidence contradicts is neutral on user intent
+ * (R-user-contradicted), so the evidence decides between those plans.
  */
-export const EVIDENCE_RUBRIC_VERSION = "evidence:v7";
-/** The blind, order-rotated adjudication protocol. v2 gives contradictions and role doubts priority over affinity. */
-export const ADJUDICATION_VERSION = "adjudicate:v2";
+export const EVIDENCE_RUBRIC_VERSION = "evidence:v8";
+/** The blind, order-rotated adjudication protocol. v2 gives contradictions and role doubts priority over affinity. v3: named choices are kept unless the evidence contradicts one. */
+export const ADJUDICATION_VERSION = "adjudicate:v3";
 
 /** The architecture a run uses: the explicit option, else RECOMMENDATION_ARCHITECTURE, else the default. */
 export function architectureFrom(option?: Architecture): Architecture {

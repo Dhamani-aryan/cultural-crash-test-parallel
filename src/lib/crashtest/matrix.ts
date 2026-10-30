@@ -56,6 +56,8 @@ export const RULES = {
   "R-mainstream": "A top-0.5% mainstream default is noted for a person; it ranks plans only when the brief asks for distinctiveness.",
   "R-coverage": "How much of the plan Qloo could measure: confidence, kept apart from quality.",
   "R-anchor-hypothesis": "Model-suggested audience anchors are hypotheses a person should confirm.",
+  "R-user-contradicted": "A named choice the evidence contradicts (no audience support here, or a global default rather than a local fit) is no longer held as user intent: keeping or replacing it is neutral, and the evidence decides.",
+  "R-evidence-contradicts": "A choice the evidence contradicts here (no audience support and a global default rather than a local fit, or a direction this audience doesn't lean to) counts against the plan, below explicit brief contradictions and above positive fit.",
   "R-user-considered": "A choice the user was only considering is a weaker statement of preference than a named choice.",
   "R-host-tier": "A venue should be a kind of place the brief's event format calls for, not merely one that can host something.",
   "R-neighborhood": "A neighbourhood the brief names is part of its brief: a venue Qloo files there, or within 2 km, fits; 2–6 km is outside it; beyond 6 km is far. Without coordinates it is unknown.",
@@ -80,6 +82,8 @@ export interface MatrixContext {
   roleChecks?: Map<string, RoleCheck>;
   /** evidence:v2: where the named neighbourhood's venues are, when Qloo returned coordinates. */
   neighborhood?: Centroid | null;
+  /** evidence:v8: slots whose named, unlocked act, brand or venue the evidence contradicts, from any plan that keeps it. Set by buildEvidenceMatrix. */
+  contradictedChoices?: Set<Slot>;
 }
 
 /** The key a role reading is stored under: the entity, else the slot and label. */
@@ -163,6 +167,21 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
     if (locked && !kept) hard.push(`${SLOT_LABEL[choice.slot]}: the brief fixes "${choice.name}", and this plan doesn't keep it.`);
     // evidence:v2: how firmly the brief asks for it (locked, named, or only considered).
     const considered = !locked && ctx.contract?.choices.find((x) => x.slot === choice.slot)?.strength === "considered";
+    if (!locked && ctx.contradictedChoices?.has(choice.slot)) {
+      add(
+        choice.slot,
+        "constraint",
+        "user-intent",
+        kept
+          ? `Keeps "${choice.name}": the brief names it, but the evidence contradicts it, so keeping it earns no brief-fit credit; the evidence decides this choice.`
+          : `Replaces "${choice.name}": the brief names it, but the evidence contradicts it, so replacing it doesn't go against the brief; the evidence decides this choice.`,
+        "unknown",
+        "user",
+        "thin",
+        { ruleId: "R-user-contradicted" },
+      );
+      continue;
+    }
     add(
       choice.slot,
       "constraint",
@@ -251,6 +270,12 @@ function claimsFor(c: CandidatePlan, ctx: MatrixContext): { claims: EvidenceClai
         add(slot, "constraint", "in-market", `${comp.label} isn't in ${ctx.city}'s country.`, "contradicts", "qloo_locality", "strong", { evidenceIds: d.evidenceIds, ruleId: "R-venue-in-market" });
       }
     }
+    if (a?.contradicted && a.status !== "constraint_conflict" && !comp.locked)
+      add(slot, "audience", "contradicted", `${comp.label}: the evidence contradicts this choice here. ${a.finding}`, "contradicts", "qloo_affinity", "moderate", {
+        ruleId: "R-evidence-contradicts",
+        evidenceIds: a.dimensions.flatMap((d) => d.evidenceIds),
+        limitations: anchorLimit,
+      });
     const dup = a?.dimensions.find((d) => d.key === "distinct");
     if (dup?.score === 0)
       add(slot, "coherence", "duplicate", `${comp.label} repeats another choice.`, "contradicts", "logical_rubric", "strong", { ruleId: "R-no-duplicate" });
@@ -474,6 +499,14 @@ export function buildEvidenceMatrix(candidates: CandidatePlan[], ctx: MatrixCont
     hardFailures: {},
     componentStates: {},
   };
+  // A named choice is user intent unless the evidence contradicts it (R-user-contradicted): read
+  // from whichever of these plans keeps it, so every plan in the comparison is scored alike.
+  const contradictedChoices = new Set<Slot>(ctx.contradictedChoices ?? []);
+  for (const c of candidates)
+    for (const a of c.evaluation?.components ?? [])
+      // An act, brand or venue only: a direction's evidence is a word mapping, too loose to overrule the brief.
+      if (a.contradicted && a.slot !== "creative_direction" && c.plan.components.some((x) => x.slot === a.slot && x.origin === "user_provided")) contradictedChoices.add(a.slot);
+  ctx = { ...ctx, contradictedChoices };
   for (const c of candidates) {
     const { claims, hard, states } = claimsFor(c, ctx);
     m.claims.push(...claims);
@@ -499,7 +532,8 @@ const PREFERENCE: Partial<Record<RuleId, number>> = { "R-user-choice": 0.5, "R-u
 /**
  * The decision policy (evidence:v7) as a vector, compared left to right:
  *   1. hard failures; 2. explicit locks kept; 3. completeness; 4. fewest explicit brief-fit
- *   contradictions; 5. fewest structured role doubts; 6. positive role and brief fit (with the
+ *   contradictions; 5. fewest structured role doubts; 5b. fewest choices the evidence contradicts
+ *   (evidence:v8); 6. positive role and brief fit (with the
  *   user's unlocked choices as weighted preferences); 7. audience support, counted per choice so
  *   one exceptional affinity can't make up for weak ones; 8. city locality; 9. cross-component
  *   coherence; 10. distinctiveness; 11. evidence coverage, as confidence only.
@@ -517,6 +551,8 @@ export function evidenceVector(m: EvidenceMatrix, candidateId: string): number[]
   // One material mismatch must not be cancelled by several unrelated positive claims. These stay
   // ordinary evidence claims (not hard failures), but plans with fewer contradictions rank first.
   const briefContradictions = mine.filter((c) => c.stance === "contradicts" && (c.dimension === "role_fit" || c.ruleId === "R-neighborhood")).length;
+  // Choices the evidence contradicts (evidence:v8): after explicit brief contradictions and role doubts, before positive fit.
+  const contradictedChoices = mine.filter((c) => c.ruleId === "R-evidence-contradicts").length;
   const roleDoubts = mine.filter(
     (c) =>
       c.stance === "unknown" &&
@@ -528,6 +564,7 @@ export function evidenceVector(m: EvidenceMatrix, candidateId: string): number[]
     m.completenessByCandidate[candidateId] ?? 0,
     briefContradictions ? -briefContradictions : 0,
     roleDoubts ? -roleDoubts : 0,
+    contradictedChoices ? -contradictedChoices : 0,
     net(mine, ["role_fit"]) + preference + net(hood, ["local"]),
     -(choices.size - supportedAudience.size),
     net(mine.filter((c) => !hood.includes(c)), ["local"]),

@@ -116,11 +116,20 @@ function akasOf(props: Obj): { value: string; languages: string[] }[] {
 const LATIN = /^[\p{Script=Latin}\p{N}\p{P}\p{S}\s]+$/u;
 
 /** Prefer the name itself when it is Latin script, else an English (or any Latin) aka. */
+/**
+ * Some Qloo places carry a listing title as their name ("Galerie X - 116 rue Y | Location
+ * showroom…"): keep the place's own name, before an SEO "|" or a " - " followed by a street address.
+ */
+export function trimListingTitle(name: string): string {
+  const short = name.split(" | ")[0].split(/ [-–] (?=\d+[a-z]?,? \p{L})/u)[0].trim();
+  return short.length >= 3 ? short : name;
+}
+
 export function pickDisplayName(
   name: string,
   akas: { value: string; languages: string[] }[],
 ): string {
-  if (LATIN.test(name)) return name;
+  if (LATIN.test(name)) return trimListingTitle(name);
   const latin = akas.filter((a) => LATIN.test(a.value));
   const english = latin.find((a) => a.languages.some((l) => l === "en" || l.startsWith("en_")));
   return (english ?? latin[0])?.value ?? name;

@@ -5,6 +5,7 @@ import {
   normalizeInsights,
   normalizeSearch,
   normalizeTags,
+  trimListingTitle,
 } from "@/lib/qloo/normalize";
 import { fixture } from "./helpers";
 
@@ -146,5 +147,18 @@ describe("place coordinates and neighbourhood", () => {
     expect(place({ ...nyc, name: "New York" }).geocode!.neighborhood).toBeNull();
     expect(place({ ...nyc, name: "New York County" }).geocode!.neighborhood).toBeNull();
     expect(place({ city: "Sydney", name: "Bondi Beach", country_code: "AU" }).geocode!.neighborhood).toBe("Bondi Beach");
+  });
+});
+
+describe("trimListingTitle", () => {
+  it("keeps a place's own name from a listing-style title", () => {
+    expect(trimListingTitle("Galerie Joseph - 116 rue de Turenne | Location showroom Pop up store Paris")).toBe("Galerie Joseph");
+    expect(trimListingTitle("Studio North | Event space hire")).toBe("Studio North");
+  });
+  it("leaves ordinary names alone", () => {
+    expect(trimListingTitle("Le Carreau du Temple")).toBe("Le Carreau du Temple");
+    expect(trimListingTitle("Carreau du Temple / dance")).toBe("Carreau du Temple / dance");
+    expect(trimListingTitle("Run-DMC")).toBe("Run-DMC");
+    expect(trimListingTitle("Blink - 182")).toBe("Blink - 182");
   });
 });
